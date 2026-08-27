@@ -7,7 +7,8 @@
 # resources), severity/confidence discipline (no escalation without evidence),
 # insight sorting and output caps, evidence-clone non-mutation, empty-state
 # behavior, HTML/JSON/CLI rendering, a performance guard, and the
-# no-Az-call / no-secret-retrieval safety contract of Core/CapabilityModel.ps1.
+# no-Az-call / no-secret-retrieval safety contract of Core/Capability.ps1 and
+# Core/Azure/CapabilityModel.Azure.ps1.
 # All fixtures are synthetic in-memory state; no Azure/Graph calls are made.
 #==============================================================================
 
@@ -21,7 +22,8 @@ BeforeAll {
     . "$projectRoot\Core\RunStatus.ps1"
     . "$projectRoot\Core\CheckRegistry.ps1"
     . "$projectRoot\Core\Azure\InventoryCache.ps1"
-    . "$projectRoot\Core\CapabilityModel.ps1"
+    . "$projectRoot\Core\Capability.ps1"
+    . "$projectRoot\Core\Azure\CapabilityModel.Azure.ps1"
     . "$projectRoot\Core\Console.ps1"
     . "$projectRoot\Export\Html.ps1"
     . "$projectRoot\Export\Json.ps1"
@@ -535,9 +537,10 @@ Describe "Phase B2 capability model" {
         }
     }
 
-    Context "safety contract (static analysis of Core/CapabilityModel.ps1)" {
+    Context "safety contract (static analysis of Core/Capability.ps1 + Core/Azure/CapabilityModel.Azure.ps1)" {
         BeforeEach {
-            $script:CapModelSrc = Get-Content -Raw (Join-Path $projectRoot 'Core\CapabilityModel.ps1')
+            $script:CapModelSrc = (Get-Content -Raw (Join-Path $projectRoot 'Core\Capability.ps1')) + "`n" +
+                                  (Get-Content -Raw (Join-Path $projectRoot 'Core\Azure\CapabilityModel.Azure.ps1'))
         }
 
         It "contains no key/secret/content retrieval or write-API call patterns" {
@@ -547,7 +550,7 @@ Describe "Phase B2 capability model" {
                 'Invoke-RestMethod', 'Invoke-WebRequest', 'Connect-AzAccount', 'Set-AzKeyVaultAccessPolicy'
             )
             foreach ($pattern in $forbidden) {
-                $script:CapModelSrc.Contains($pattern) | Should -BeFalse -Because "CapabilityModel.ps1 must not reference '$pattern'"
+                $script:CapModelSrc.Contains($pattern) | Should -BeFalse -Because "the capability model modules must not reference '$pattern'"
             }
         }
 

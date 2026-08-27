@@ -58,7 +58,8 @@ function Initialize-AuditState {
         # Environment footprint (Core/Azure/Footprint.ps1): subscriptions/RGs/resources/
         # resource-type counts. $null until the pre-scan runs; drives applicability.
         Footprint = $null
-        # Phase B2 capability model (Core/CapabilityModel.ps1): nodes/edges/
+        # Phase B2 capability model (Core/Capability.ps1 +
+        # Core/Azure/CapabilityModel.Azure.ps1): nodes/edges/
         # insights built AFTER assessment from already-collected data only.
         # $null until Build-CapabilityModel runs; consumed by JSON/HTML/CLI.
         CapabilityModel = $null
