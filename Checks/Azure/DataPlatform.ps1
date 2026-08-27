@@ -21,22 +21,27 @@ function Test-CosmosDBSecurity {
     
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
+
         Write-Progress -Activity "Checking Cosmos DB security" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
-        
+
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind CosmosAccounts
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { continue }
+            Write-AuditLog -Message "Failed to check Cosmos DB security in subscription $($sub.Name): Cosmos DB account enumeration failed" -Level ERROR
+            continue
+        }
+
+        # Per-account Invoke-AzRestMethod detail reads still need the session
+        # on this subscription (deduped no-op right after a fresh fetch).
+        if (@($inv.Items).Count -gt 0 -and -not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+            continue
+        }
+
         try {
-            $resources = Invoke-AzureCommand -Command {
-                Get-AzResource -ResourceType "Microsoft.DocumentDb/databaseAccounts" -ErrorAction Stop
-            } -CommandName "Get-CosmosResources"
-            
-            foreach ($resource in $resources) {
+            foreach ($resource in $inv.Items) {
                 try {
                     $rgName = $resource.ResourceGroupName
                     $apiPath = "/subscriptions/$($sub.Id)/resourceGroups/$rgName/providers/Microsoft.DocumentDb/databaseAccounts/$($resource.Name)?api-version=2023-04-15"
@@ -164,22 +169,21 @@ function Test-SynapsePublicAccess {
     
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
+
         Write-Progress -Activity "Checking Synapse public access" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
-        
+
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind SynapseWorkspaces
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { continue }
+            Write-AuditLog -Message "Failed to check Synapse public access in subscription $($sub.Name): Synapse workspace enumeration failed" -Level ERROR
+            continue
+        }
+
         try {
-            $workspaces = Invoke-AzureCommand -Command {
-                Get-AzSynapseWorkspace -ErrorAction Stop
-            } -CommandName "Get-SynapseWorkspaces"
-            
-            foreach ($workspace in $workspaces) {
+            foreach ($workspace in $inv.Items) {
                 $publicAccess = if ($workspace.PSObject.Properties.Name -contains 'PublicNetworkAccess') { $workspace.PublicNetworkAccess } else { "Enabled" }
                 $managedVNet = -not [string]::IsNullOrEmpty($workspace.ManagedVirtualNetwork)
                 

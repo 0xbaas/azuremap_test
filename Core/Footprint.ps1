@@ -41,6 +41,9 @@ function Get-EnvironmentFootprint {
         Regions               = @()
         TopTypes              = @()
         TypeCounts            = @{}
+        # Perf phase: per-subscription type counts (subId(lower) -> @{ type(lower) = count }).
+        # Enables proven-empty gating per subscription (Get-SubscriptionInventory).
+        TypeCountsBySub       = @{}
         Source                = 'Unavailable'
         SubscriptionsExpected = $expectedIds.Count
         SubscriptionsCovered  = 0
@@ -53,10 +56,15 @@ function Get-EnvironmentFootprint {
     # scoping: invoked with & from inside this function, so it sees $fp/$rgNames.
     $rgNames = @{}
     $addResource = {
-        param([string]$Type, [string]$Location, [string]$ResourceGroup)
+        param([string]$Type, [string]$Location, [string]$ResourceGroup, [string]$SubscriptionId)
         $t = "$Type".ToLowerInvariant()
         if (-not $t) { return }
         if ($fp.TypeCounts.ContainsKey($t)) { $fp.TypeCounts[$t]++ } else { $fp.TypeCounts[$t] = 1 }
+        if ($SubscriptionId) {
+            $sk = $SubscriptionId.ToLowerInvariant()
+            if (-not $fp.TypeCountsBySub.ContainsKey($sk)) { $fp.TypeCountsBySub[$sk] = @{} }
+            if ($fp.TypeCountsBySub[$sk].ContainsKey($t)) { $fp.TypeCountsBySub[$sk][$t]++ } else { $fp.TypeCountsBySub[$sk][$t] = 1 }
+        }
         $fp.Resources++
         if ($Location -and $fp.Regions -notcontains $Location) { $fp.Regions += $Location }
         if ($ResourceGroup) { $rgNames[$ResourceGroup.ToLowerInvariant()] = $true }
@@ -72,7 +80,7 @@ function Get-EnvironmentFootprint {
                 $null = Set-AzContext -SubscriptionId "$($sub.Id)" -ErrorAction Stop
                 $res = @(Get-AzResource -ErrorAction Stop)
                 foreach ($r in $res) {
-                    & $addResource -Type $r.ResourceType -Location "$($r.Location)" -ResourceGroup "$($r.ResourceGroupName)"
+                    & $addResource -Type $r.ResourceType -Location "$($r.Location)" -ResourceGroup "$($r.ResourceGroupName)" -SubscriptionId "$($sub.Id)"
                 }
                 $ok.Add("$($sub.Id)".ToLowerInvariant())
             }
@@ -98,6 +106,17 @@ function Get-EnvironmentFootprint {
             # the current/default subscription (or the wrong tenant) would
             # produce a narrow footprint that drives false NotApplicable.
             $subRows  = @(Search-AzGraph -Query "ResourceContainers | where type =~ 'microsoft.resources/subscriptions' | project subscriptionId=tostring(subscriptionId)" -Subscription $subIds -ErrorAction Stop)
+            # Perf phase: per-subscription type counts for proven-empty gating
+            # (one extra summarized query; no resource rows are pulled).
+            $subTypeRows = @(Search-AzGraph -Query "Resources | summarize Count=count() by subscriptionId=tostring(subscriptionId), type=tostring(type)" -Subscription $subIds -ErrorAction Stop)
+            foreach ($row in $subTypeRows) {
+                $sk = "$($row.subscriptionId)".ToLowerInvariant()
+                $tk = "$($row.type)".ToLowerInvariant()
+                if ($sk -and $tk) {
+                    if (-not $fp.TypeCountsBySub.ContainsKey($sk)) { $fp.TypeCountsBySub[$sk] = @{} }
+                    $fp.TypeCountsBySub[$sk][$tk] = [int]$row.Count
+                }
+            }
 
             foreach ($row in $typeRows) {
                 $t = "$($row.type)".ToLowerInvariant()

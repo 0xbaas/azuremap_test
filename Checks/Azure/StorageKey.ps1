@@ -55,37 +55,42 @@ function Test-StorageKeyExposure {
     $skippedResources = 0
 
     foreach ($sub in @($Subscriptions)) {
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            $subsSkipped.Add($sub.Name)
-            continue
-        }
-
-        # -IncludeAccountSASPolicy is not supported by all Az.Storage versions.
-        # Detect once (cached) and degrade SAS evidence to partial, not failure.
-        $sasSupported = Test-StorageSasPolicySupported
-        try {
-            if ($sasSupported) {
-                $accounts = @(Get-AzStorageAccount -IncludeAccountSASPolicy -ErrorAction Stop)
-            } else {
-                $accounts = @(Get-AzStorageAccount -ErrorAction Stop)
+        # Perf phase: shared per-run inventory (one enumeration per subscription
+        # across ALL storage checks). The cache fetch feature-detects
+        # -IncludeAccountSASPolicy itself (Core/InventoryCache.ps1). ContextSwitch
+        # -> skipped sub; Fetch -> failed collection (same coverage semantics).
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind StorageAccounts
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') {
+                $subsSkipped.Add($sub.Name)
             }
-        }
-        catch {
-            $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name; Reason = "Storage account collection failed: $($_.Exception.Message)" })
+            else {
+                $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name; Reason = "Storage account collection failed (detail in audit log)" })
+            }
             continue
         }
 
         $subsEvaluated.Add($sub.Name)
-        $totalAccounts += $accounts.Count
+        $totalAccounts += @($inv.Items).Count
 
-        if (-not $sasSupported) {
+        # -IncludeAccountSASPolicy is not supported by all Az.Storage versions.
+        # Detect once (cached) and degrade SAS evidence to partial, not failure.
+        if (-not (Test-StorageSasPolicySupported)) {
             $notEval.Add([PSCustomObject]@{
                 SubscriptionName = $sub.Name
                 Reason = "Account SAS expiration policy not evaluated (installed Az.Storage does not support -IncludeAccountSASPolicy)"
             })
         }
 
-        foreach ($sa in $accounts) {
+        # Per-account Get-AzRoleAssignment calls still need the session on this
+        # subscription (deduped no-op right after a fresh fetch, required on
+        # cache hits from a different subscription).
+        if (@($inv.Items).Count -gt 0 -and -not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+            $subsSkipped.Add($sub.Name)
+            continue
+        }
+
+        foreach ($sa in $inv.Items) {
             $saName = "$($sa.StorageAccountName)"
             $rg     = "$($sa.ResourceGroupName)"
 

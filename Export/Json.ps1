@@ -134,6 +134,7 @@ function Export-ResultsJson {
             Summary = (Get-JsonSummaryBlock -Results $Results)
             Footprint           = $script:State.Footprint
             ExecutedChecks      = $script:State.ExecutedChecks
+            Performance         = (Get-PerformanceSummary -Top 10)
             Findings            = $findingsForExport
             FailedSubscriptions = $script:State.FailedSubscriptions
         }

@@ -19,6 +19,7 @@ BeforeAll {
     . "$projectRoot\Core\Retry.ps1"
     . "$projectRoot\Core\RunStatus.ps1"
     . "$projectRoot\Core\CheckRegistry.ps1"
+    . "$projectRoot\Core\InventoryCache.ps1"
     . "$projectRoot\Checks\Azure\Storage.ps1"
     . "$projectRoot\Checks\Azure\StorageKey.ps1"
     . "$projectRoot\Checks\Azure\Identity.ps1"
@@ -135,7 +136,7 @@ Describe "Phase15 - B1 smoke cleanup" {
 
         It "risky assignment -> FAIL even when another collection also failed" {
             $global:FxWebApps = @(New-TestApp -Name 'app1' -PrincipalId '11111111-1111-1111-1111-111111111111')
-            $global:FxRbac = @([PSCustomObject]@{ RoleDefinitionName = 'Owner'; Scope = '/subscriptions/S1' })
+            $global:FxRbac = @([PSCustomObject]@{ ObjectId = '11111111-1111-1111-1111-111111111111'; RoleDefinitionName = 'Owner'; Scope = '/subscriptions/S1' })
             $global:FxVMsThrow = $true
             Test-IdentityResourceMapping -Subscriptions @($global:FxSub) -Exclusions @{}
             $all = (script:Get-Res -CheckId 'IDENTITY-006')

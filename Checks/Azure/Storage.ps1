@@ -265,23 +265,23 @@ function Test-StorageSharedKeyAccess {
 
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            Write-Progress -Activity "Checking Storage Shared Key Access" -Status "Subscription: $($sub.Name) (skipped)" `
-                          -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) -Id $ProgressId
-            # B1: a failed context switch is recorded as skipped coverage, not silently dropped.
-            $subsSkipped.Add($sub.Name)
-            continue
-        }
         Write-Progress -Activity "Checking Storage Shared Key Access" -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) -Id $ProgressId
 
-        $col = Get-StorageAccountCollection
-        if ($col.Threw) { $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name }); continue }
+        # Perf phase: shared per-run inventory (one enumeration per subscription
+        # across ALL storage checks). ContextSwitch -> skipped sub; Fetch ->
+        # failed collection (same coverage semantics as before).
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind StorageAccounts
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { $subsSkipped.Add($sub.Name) }
+            else { $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name }) }
+            continue
+        }
 
         $subsEvaluated.Add($sub.Name)
-        $totalAccounts += @($col.Accounts).Count
+        $totalAccounts += @($inv.Items).Count
 
-        foreach ($sa in $col.Accounts) {
+        foreach ($sa in $inv.Items) {
             # Azure semantics: AllowSharedKeyAccess $null/unspecified => shared key IS
             # allowed (the account default). Only an explicit $false is safe.
             $ask = Get-StorageAccountProperty -Account $sa -Name 'AllowSharedKeyAccess'
@@ -350,22 +350,27 @@ function Test-StoragePublicAccess {
 
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            Write-Progress -Activity "Checking Storage Public Access" -Status "Subscription: $($sub.Name) (skipped)" `
-                          -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) -Id $ProgressId
-            $subsSkipped.Add($sub.Name)
-            continue
-        }
         Write-Progress -Activity "Checking Storage Public Access" -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) -Id $ProgressId
 
-        $col = Get-StorageAccountCollection
-        if ($col.Threw) { $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name }); continue }
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind StorageAccounts
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { $subsSkipped.Add($sub.Name) }
+            else { $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name }) }
+            continue
+        }
 
         $subsEvaluated.Add($sub.Name)
-        $totalAccounts += @($col.Accounts).Count
+        $totalAccounts += @($inv.Items).Count
 
-        foreach ($sa in $col.Accounts) {
+        # Per-account network rule sets still need the session on this
+        # subscription (deduped no-op right after a fresh fetch).
+        if (@($inv.Items).Count -gt 0 -and -not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+            $subsSkipped.Add($sub.Name)
+            continue
+        }
+
+        foreach ($sa in $inv.Items) {
             $net = Invoke-AzureCommand -Command {
                 Get-AzStorageAccountNetworkRuleSet -ResourceGroupName $sa.ResourceGroupName -Name $sa.StorageAccountName -ErrorAction SilentlyContinue
             } -CommandName "Get-StorageNetworkRules" -SkipContextCheck
@@ -479,21 +484,20 @@ function Test-StorageAdvancedSecurity {
 
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            $subsSkipped.Add($sub.Name)
-            continue
-        }
-
         Write-Progress -Activity "Checking Storage Advanced Security" -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) -Id $ProgressId
 
-        $col = Get-StorageAccountCollection
-        if ($col.Threw) { $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name }); continue }
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind StorageAccounts
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { $subsSkipped.Add($sub.Name) }
+            else { $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name }) }
+            continue
+        }
 
         $subsEvaluated.Add($sub.Name)
-        $totalAccounts += @($col.Accounts).Count
+        $totalAccounts += @($inv.Items).Count
 
-        foreach ($sa in $col.Accounts) {
+        foreach ($sa in $inv.Items) {
             # Secure transfer (HTTPS-only). Newer object shape uses EnableHttpsTrafficOnly;
             # some shapes expose SupportsHttpsTrafficOnly. Only flag an EXPLICIT $false
             # (null/absent is the enabled default; flagging it would be a false positive).
@@ -591,21 +595,20 @@ function Test-StorageAnonymousBlobAccess {
 
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            $subsSkipped.Add($sub.Name)
-            continue
-        }
-
         Write-Progress -Activity "Checking anonymous blob access" -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) -Id $ProgressId
 
-        $col = Get-StorageAccountCollection
-        if ($col.Threw) { $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name; Reason = "Storage account collection failed" }); continue }
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind StorageAccounts
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { $subsSkipped.Add($sub.Name) }
+            else { $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name; Reason = "Storage account collection failed" }) }
+            continue
+        }
 
         $subsEvaluated.Add($sub.Name)
-        $totalAccounts += @($col.Accounts).Count
+        $totalAccounts += @($inv.Items).Count
 
-        foreach ($sa in $col.Accounts) {
+        foreach ($sa in $inv.Items) {
             # Account-level guard: if blob public access is disabled at the account, no
             # container can be anonymous - a clean, evaluated PASS for this account.
             $blob = Get-StorageAccountProperty -Account $sa -Name 'AllowBlobPublicAccess'
@@ -701,32 +704,38 @@ function Test-StorageExfiltrationVectors {
 
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            $subsSkipped.Add($sub.Name)
-            continue
-        }
-
         Write-Progress -Activity "Checking storage exfiltration vectors" -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) -Id $ProgressId
 
-        $col = Get-StorageAccountCollection -IncludeSasPolicy
-        if ($col.Threw) { $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name }); continue }
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind StorageAccounts
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { $subsSkipped.Add($sub.Name) }
+            else { $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name }) }
+            continue
+        }
 
         $subsEvaluated.Add($sub.Name)
-        $totalAccounts += @($col.Accounts).Count
+        $totalAccounts += @($inv.Items).Count
 
         # SAS policy evidence unavailable on this Az.Storage version: the account set
         # was still collected and all other vectors are evaluated, but the SAS-expiry
         # vector is unproven -> record once per subscription so status degrades to
         # PARTIAL instead of pretending full coverage.
-        if ($col.SasPolicyUnavailable) {
+        if (-not (Test-StorageSasPolicySupported)) {
             $notEval.Add([PSCustomObject]@{
                 SubscriptionName = $sub.Name
                 Reason = "Account SAS expiration policy not evaluated (installed Az.Storage does not support -IncludeAccountSASPolicy)"
             })
         }
 
-        foreach ($sa in $col.Accounts) {
+        # Per-account network rule sets still need the session on this
+        # subscription (deduped no-op right after a fresh fetch).
+        if (@($inv.Items).Count -gt 0 -and -not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+            $subsSkipped.Add($sub.Name)
+            continue
+        }
+
+        foreach ($sa in $inv.Items) {
             $networkRuleSet = Invoke-AzureCommand -Command {
                 Get-AzStorageAccountNetworkRuleSet -ResourceGroupName $sa.ResourceGroupName -AccountName $sa.StorageAccountName -ErrorAction SilentlyContinue
             } -CommandName "Get-StorageNetworkRules" -SkipContextCheck

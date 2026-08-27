@@ -8,7 +8,9 @@ BeforeAll {
     . "$projectRoot\Core\State.ps1"
     . "$projectRoot\Core\Logging.ps1"
     . "$projectRoot\Core\Exclusions.ps1"
+    . "$projectRoot\Core\Retry.ps1"
     . "$projectRoot\Core\CheckRegistry.ps1"
+    . "$projectRoot\Core\InventoryCache.ps1"
     . "$projectRoot\Checks\Azure\Storage.ps1"     # New-StorageCoverage helpers used by STORAGE-006
     . "$projectRoot\Checks\Azure\StorageKey.ps1"
 
@@ -31,6 +33,10 @@ BeforeAll {
 
 Describe "STORAGE-006 Storage key/SAS exposure" {
     BeforeEach {
+        # Fresh state per test: re-initializing also resets the shared per-run
+        # inventory cache, so each test's Get-AzStorageAccount mock is enumerated.
+        $script:State = Initialize-AuditState
+        $script:State.Config.Quiet = $true
         $script:State.Results.Clear()
         # Tests emulate an Az.Storage version WITH -IncludeAccountSASPolicy support
         # (unsupported-version behavior is covered in Phase15).

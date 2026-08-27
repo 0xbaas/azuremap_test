@@ -24,6 +24,7 @@ BeforeAll {
     . "$projectRoot\Core\RunStatus.ps1"
     . "$projectRoot\Core\Footprint.ps1"
     . "$projectRoot\Core\CheckRegistry.ps1"
+    . "$projectRoot\Core\InventoryCache.ps1"
     . "$projectRoot\Core\Console.ps1"
     . "$projectRoot\Export\Csv.ps1"
     . "$projectRoot\Export\Json.ps1"

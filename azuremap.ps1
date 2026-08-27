@@ -287,7 +287,10 @@ try {
         Show-EnvironmentFootprint -Footprint $script:State.Footprint
         if (-not $script:State.Config.Quiet) {
             $phaseElapsed = (Get-Date) - $phaseStart
+            $script:State.Timing.Phases['Discovery'] = [Math]::Round($phaseElapsed.TotalSeconds, 1)
             Write-UiHost -Text ("  Discovery completed in {0}m {1}s" -f [int]$phaseElapsed.TotalMinutes, $phaseElapsed.Seconds) -Color DarkGray
+        } else {
+            $script:State.Timing.Phases['Discovery'] = [Math]::Round(((Get-Date) - $phaseStart).TotalSeconds, 1)
         }
     }
 
@@ -301,6 +304,7 @@ try {
     if (-not $script:State.Config.Quiet) { Write-UiHost -Text "Collecting data..." -Color Cyan }
     $phaseStart = Get-Date
     Invoke-AzureMapCollection -SkipEntra:$azureOnly -EntraOnly:$EntraOnly -UseGraphBeta:$UseGraphBeta
+    $script:State.Timing.Phases['Collection'] = [Math]::Round(((Get-Date) - $phaseStart).TotalSeconds, 1)
     if (-not $script:State.Config.Quiet) {
         $phaseElapsed = (Get-Date) - $phaseStart
         Write-UiHost -Text ("  Collection completed in {0}m {1}s" -f [int]$phaseElapsed.TotalMinutes, $phaseElapsed.Seconds) -Color DarkGray
@@ -320,6 +324,7 @@ try {
         if ($azureOnly)  { $auditParams["SkipEntra"]  = $true }
         if ($EntraOnly)  { $auditParams["EntraOnly"]  = $true }
         Invoke-AuditChecks @auditParams
+        $script:State.Timing.Phases['Assessment'] = [Math]::Round(((Get-Date) - $phaseStart).TotalSeconds, 1)
         if (-not $script:State.Config.Quiet) {
             $phaseElapsed = (Get-Date) - $phaseStart
             Write-UiHost -Text ''

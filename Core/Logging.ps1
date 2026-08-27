@@ -108,6 +108,77 @@ function Format-UiNumber {
     return $n.ToString('#,##0', [System.Globalization.CultureInfo]::InvariantCulture)
 }
 
+function Format-UiDuration {
+    <#
+    .SYNOPSIS
+        Formats a duration in seconds as a compact human string ("8m 12s",
+        "43s") for the Performance summary. Sub-second values show one decimal.
+    #>
+    [CmdletBinding()]
+    param([object]$Seconds)
+    $s = 0.0
+    try { $s = [double]$Seconds } catch { $s = 0.0 }
+    if ($s -ge 3600) { return '{0}h {1}m {2}s' -f [int]($s / 3600), [int](($s % 3600) / 60), [int]($s % 60) }
+    if ($s -ge 60)   { return '{0}m {1}s' -f [int]($s / 60), [int]($s % 60) }
+    if ($s -ge 10)   { return '{0}s' -f [int]$s }
+    return '{0:n1}s' -f $s
+}
+
+function Get-PerformanceSummary {
+    <#
+    .SYNOPSIS
+        Builds the run performance summary object from State timing data.
+    .DESCRIPTION
+        Aggregates phase durations (Discovery/Collection/Assessment/Export),
+        the slowest checks (top N by DurationSeconds), and the slowest
+        subscriptions (top N by inventory-collection time, when measured).
+        Pure read of $script:State - safe to call from CLI and JSON export.
+    .OUTPUTS
+        [pscustomobject] with Phases, TotalSeconds, SlowestChecks,
+        SlowestSubscriptions, ExportSeconds.
+    #>
+    [CmdletBinding()]
+    param([int]$Top = 10)
+
+    $phases = @{}
+    if ($script:State.Timing -and $script:State.Timing.Phases) {
+        foreach ($k in $script:State.Timing.Phases.Keys) { $phases[$k] = [double]$script:State.Timing.Phases[$k] }
+    }
+
+    $slowestChecks = @($script:State.ExecutedChecks |
+        Where-Object { $null -ne $_.DurationSeconds } |
+        Sort-Object { [double]$_.DurationSeconds } -Descending |
+        Select-Object -First $Top |
+        ForEach-Object {
+            [PSCustomObject]@{
+                CheckId         = $_.CheckId
+                Name            = $_.Name
+                DurationSeconds = [double]$_.DurationSeconds
+            }
+        })
+
+    $slowestSubs = @()
+    if ($script:State.Timing -and $script:State.Timing.SubscriptionFetchSeconds -and $script:State.Timing.SubscriptionFetchSeconds.Count -gt 0) {
+        $slowestSubs = @($script:State.Timing.SubscriptionFetchSeconds.GetEnumerator() |
+            Sort-Object { [double]$_.Value } -Descending |
+            Select-Object -First $Top |
+            ForEach-Object {
+                [PSCustomObject]@{ Subscription = $_.Key; FetchSeconds = [Math]::Round([double]$_.Value, 1) }
+            })
+    }
+
+    $total = 0.0
+    if ($script:State.StartTime) { $total = ((Get-Date) - $script:State.StartTime).TotalSeconds }
+
+    [PSCustomObject]@{
+        Phases                = $phases
+        ExportSeconds         = if ($phases.ContainsKey('Export')) { [double]$phases['Export'] } else { $null }
+        TotalSeconds          = [Math]::Round($total, 1)
+        SlowestChecks         = $slowestChecks
+        SlowestSubscriptions  = $slowestSubs
+    }
+}
+
 function Write-AuditLog {
     <#
     .SYNOPSIS

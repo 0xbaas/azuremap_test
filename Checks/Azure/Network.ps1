@@ -26,23 +26,25 @@ function Test-NSGPermissiveRules {
     $totalProcessed = 0
     
     foreach ($sub in $Subscriptions) {
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
         Write-Progress -Activity "Checking NSG Permissive Rules" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
-        
+
+        # Perf phase: shared per-run inventory. ContextSwitch -> skipped sub
+        # (silent continue as before); Fetch -> failed collection (ERROR log).
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind NetworkSecurityGroups
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'Fetch') {
+                Write-AuditLog -Message "Failed to check NSG rules in subscription $($sub.Name): inventory fetch failed" -Level ERROR
+            }
+            continue
+        }
+
+        $totalProcessed++
+
         try {
-            $nsgs = Invoke-AzureCommand -Command { 
-                Get-AzNetworkSecurityGroup -ErrorAction Stop
-            } -CommandName "Get-NSGs" -SkipContextCheck -Critical
-            
-            $totalProcessed++
-            
-            foreach ($nsg in $nsgs) {
+            foreach ($nsg in $inv.Items) {
                 foreach ($rule in $nsg.SecurityRules) {
                     if ($rule.Access -eq "Allow" -and $rule.Direction -eq "Inbound") {
                         $sourceIsWideOpen = $false
@@ -187,22 +189,28 @@ function Test-PrivateEndpointsDNS {
     
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
+
         Write-Progress -Activity "Checking Private Endpoint DNS" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
-        
+
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind PrivateEndpoints
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'Fetch') {
+                Write-AuditLog -Message "Failed to check private endpoint DNS in subscription $($sub.Name): inventory fetch failed" -Level ERROR
+            }
+            continue
+        }
+
+        # Per-endpoint DNS zone group calls still need the session on this
+        # subscription (deduped no-op right after a fresh fetch).
+        if (@($inv.Items).Count -gt 0 -and -not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+            continue
+        }
+
         try {
-            $privateEndpoints = Invoke-AzureCommand -Command {
-                Get-AzPrivateEndpoint -ErrorAction Stop
-            } -CommandName "Get-PrivateEndpoints"
-            
-            foreach ($pe in $privateEndpoints) {
+            foreach ($pe in $inv.Items) {
                 $dnsZoneGroups = Invoke-AzureCommand -Command {
                     Get-AzPrivateDnsZoneGroup -ResourceGroupName $pe.ResourceGroupName `
                                              -PrivateEndpointName $pe.Name `
@@ -255,22 +263,22 @@ function Test-PublicIPInventory {
     
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
+
         Write-Progress -Activity "Checking public IP inventory" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
-        
+
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind PublicIpAddresses
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'Fetch') {
+                Write-AuditLog -Message "Failed to check public IPs in subscription $($sub.Name): inventory fetch failed" -Level ERROR
+            }
+            continue
+        }
+
         try {
-            $publicIps = Invoke-AzureCommand -Command {
-                Get-AzPublicIpAddress -ErrorAction Stop
-            } -CommandName "Get-PublicIPs"
-            
-            foreach ($pip in $publicIps) {
+            foreach ($pip in $inv.Items) {
                 $dnsName = if ($pip.DnsSettings) { $pip.DnsSettings.Fqdn } else { $null }
                 $sku = if ($pip.Sku) { $pip.Sku.Name } else { "Basic" }
                 
@@ -351,21 +359,22 @@ function Test-VNetSubnetSecurity {
     
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
+
         Write-Progress -Activity "Checking VNet subnet security" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
-        
+
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind VirtualNetworks
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'Fetch') {
+                Write-AuditLog -Message "Failed to check VNet subnet security in subscription $($sub.Name): inventory fetch failed" -Level ERROR
+            }
+            continue
+        }
+
         try {
-            $vnets = Invoke-AzureCommand -Command {
-                Get-AzVirtualNetwork -ErrorAction Stop
-            } -CommandName "Get-VNets"
-            
-            foreach ($vnet in $vnets) {
+            foreach ($vnet in $inv.Items) {
                 foreach ($subnet in $vnet.Subnets) {
                     $hasNSG = -not [string]::IsNullOrEmpty($subnet.NetworkSecurityGroup.Id)
                     $addressPrefix = $subnet.AddressPrefix
@@ -440,21 +449,28 @@ function Test-VNetPeeringSecurity {
     
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
+
         Write-Progress -Activity "Checking VNet peering security" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
-        
+
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind VirtualNetworks
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'Fetch') {
+                Write-AuditLog -Message "Failed to check VNet peering in subscription $($sub.Name): inventory fetch failed" -Level ERROR
+            }
+            continue
+        }
+
+        # Per-VNet peering calls still need the session on this subscription
+        # (deduped no-op right after a fresh fetch).
+        if (@($inv.Items).Count -gt 0 -and -not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+            continue
+        }
+
         try {
-            $vnets = Invoke-AzureCommand -Command {
-                Get-AzVirtualNetwork -ErrorAction Stop
-            } -CommandName "Get-VNets"
-            
-            foreach ($vnet in $vnets) {
+            foreach ($vnet in $inv.Items) {
                 $peerings = Invoke-AzureCommand -Command {
                     Get-AzVirtualNetworkPeering -ResourceGroupName $vnet.ResourceGroupName `
                                                -VirtualNetworkName $vnet.Name `
@@ -559,21 +575,22 @@ function Test-AzureFirewallThreatIntel {
     
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
+
         Write-Progress -Activity "Checking Azure Firewall threat intel" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
-        
+
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind Firewalls
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'Fetch') {
+                Write-AuditLog -Message "Failed to check Azure Firewall threat intel in subscription $($sub.Name): inventory fetch failed" -Level ERROR
+            }
+            continue
+        }
+
         try {
-            $firewalls = Invoke-AzureCommand -Command {
-                Get-AzFirewall -ErrorAction Stop
-            } -CommandName "Get-Firewalls"
-            
-            foreach ($fw in $firewalls) {
+            foreach ($fw in $inv.Items) {
                 $threatMode = if ($fw.PSObject.Properties.Name -contains "ThreatIntelMode") { $fw.ThreatIntelMode } else { "Unknown" }
                 if ($threatMode -eq "Off" -or [string]::IsNullOrEmpty($threatMode)) {
                     $noThreatIntel.Add([PSCustomObject]@{
@@ -619,21 +636,22 @@ function Test-ApplicationGatewayWAF {
     
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
+
         Write-Progress -Activity "Checking Application Gateway WAF" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
-        
+
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind ApplicationGateways
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'Fetch') {
+                Write-AuditLog -Message "Failed to check Application Gateway WAF in subscription $($sub.Name): inventory fetch failed" -Level ERROR
+            }
+            continue
+        }
+
         try {
-            $gateways = Invoke-AzureCommand -Command {
-                Get-AzApplicationGateway -ErrorAction Stop
-            } -CommandName "Get-AppGateways"
-            
-            foreach ($appgw in $gateways) {
+            foreach ($appgw in $inv.Items) {
                 $wafConfig = $appgw.WebApplicationFirewallConfiguration
                 $skuName = if ($appgw.Sku) { $appgw.Sku.Name } else { "Unknown" }
                 $wafEnabled = if ($wafConfig) { $wafConfig.Enabled } else { $false }
@@ -707,22 +725,26 @@ function Test-NetworkExfiltrationPaths {
     
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
+
         Write-Progress -Activity "Checking network exfiltration paths" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
-        
+
+        # Two kinds, old independent failure semantics preserved: an NSG fetch
+        # failure skips the subscription (the NSG enumeration came first); a
+        # RouteTable fetch failure keeps the NSG evidence already collected
+        # and only skips the route-table pass.
+        $invNsg = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind NetworkSecurityGroups
+        if ($invNsg.Unavailable) {
+            if ($invNsg.UnavailableReason -eq 'Fetch') {
+                Write-AuditLog -Message "Failed to check network exfiltration paths in subscription $($sub.Name): inventory fetch failed" -Level ERROR
+            }
+            continue
+        }
+
         try {
-            $nsgs = Invoke-AzureCommand -Command {
-                Get-AzNetworkSecurityGroup -ErrorAction Stop
-            } -CommandName "Get-NSGs"
-            
-            foreach ($nsg in $nsgs) {
+            foreach ($nsg in $invNsg.Items) {
                 foreach ($rule in $nsg.SecurityRules) {
                     if ($rule.Access -ne "Allow" -or $rule.Direction -ne "Outbound") { continue }
                     
@@ -756,11 +778,21 @@ function Test-NetworkExfiltrationPaths {
                 }
             }
             
-            $routeTables = Invoke-AzureCommand -Command {
-                Get-AzRouteTable -ErrorAction Stop
-            } -CommandName "Get-RouteTables"
-            
-            foreach ($rt in $routeTables) {
+        }
+        catch {
+            Write-AuditLog -Message "Failed to check network exfiltration paths in subscription $($sub.Name): $_" -Level ERROR
+        }
+
+        $invRt = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind RouteTables
+        if ($invRt.Unavailable) {
+            if ($invRt.UnavailableReason -eq 'Fetch') {
+                Write-AuditLog -Message "Failed to check network exfiltration paths in subscription $($sub.Name): inventory fetch failed" -Level ERROR
+            }
+            continue
+        }
+
+        try {
+            foreach ($rt in $invRt.Items) {
                 foreach ($route in $rt.Routes) {
                     if ($route.AddressPrefix -eq "0.0.0.0/0" -and $route.NextHopType -eq "Internet") {
                         $defaultRoutes.Add([PSCustomObject]@{

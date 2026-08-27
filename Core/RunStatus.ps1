@@ -56,6 +56,8 @@ function New-CheckExecutionRecord {
         Status      = 'Pending'
         StartedAt   = Get-Date
         CompletedAt = $null
+        # Perf phase: wall-clock seconds for this check (set on completion).
+        DurationSeconds = $null
         ErrorClass  = $null
         Detail      = $null
         StackTrace  = $null
@@ -68,6 +70,27 @@ function New-CheckExecutionRecord {
         # checks need data-plane access even when the check never ran
         # (Skipped: data-plane checks disabled).
         DataPlaneRequired = [bool]$Check.RequiresDataPlane
+    }
+}
+
+function Complete-CheckExecutionRecord {
+    <#
+    .SYNOPSIS
+        Marks a check execution record completed and stamps its duration.
+    .DESCRIPTION
+        Single place that sets CompletedAt so per-check wall-clock timing
+        (DurationSeconds) is always recorded, for runs, skips, and gated
+        checks alike. Feeds the Performance summary and JSON timing data.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Record
+    )
+
+    $Record.CompletedAt = Get-Date
+    if ($Record.StartedAt) {
+        $Record.DurationSeconds = [Math]::Round(($Record.CompletedAt - $Record.StartedAt).TotalSeconds, 2)
     }
 }
 

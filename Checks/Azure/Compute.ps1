@@ -29,22 +29,23 @@ function Test-AKSAdvancedSecurity {
     
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
+
         Write-Progress -Activity "Checking AKS advanced posture" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
-        
+
+        # Perf phase: shared per-run inventory. ContextSwitch -> skipped sub;
+        # Fetch -> failed collection (same semantics as before).
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind AksClusters
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { continue }
+            Write-AuditLog -Message "Failed to check AKS advanced posture in subscription $($sub.Name): cluster collection failed" -Level ERROR
+            continue
+        }
+
         try {
-            $aksClusters = Invoke-AzureCommand -Command {
-                Get-AzAksCluster -ErrorAction Stop
-            } -CommandName "Get-AksClusters"
-            
-            foreach ($aks in $aksClusters) {
+            foreach ($aks in $inv.Items) {
                 $apiAccessProfile = $aks.APIServerAccessProfile
                 $networkProfile = $aks.NetworkProfile
                 $aadProfile = $aks.AadProfile
@@ -172,22 +173,23 @@ function Test-AKSPrivilegeEscalation {
     
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
+
         Write-Progress -Activity "Checking AKS privilege escalation" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
-        
+
+        # Perf phase: shared per-run inventory. ContextSwitch -> skipped sub;
+        # Fetch -> failed collection (same semantics as before).
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind AksClusters
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { continue }
+            Write-AuditLog -Message "Failed to check AKS privilege escalation in subscription $($sub.Name): cluster collection failed" -Level ERROR
+            continue
+        }
+
         try {
-            $aksClusters = Invoke-AzureCommand -Command {
-                Get-AzAksCluster -ErrorAction Stop
-            } -CommandName "Get-AksClusters"
-            
-            foreach ($aks in $aksClusters) {
+            foreach ($aks in $inv.Items) {
                 $apiAccessProfile = $aks.APIServerAccessProfile
                 $publicNoIPRestriction = $false
                 if ($apiAccessProfile -and $apiAccessProfile.EnablePrivateCluster -eq $false) {
@@ -274,22 +276,29 @@ function Test-ContainerRegistrySecurity {
     
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
+
         Write-Progress -Activity "Checking Container Registry security" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
-        
+
+        # Perf phase: shared per-run inventory. ContextSwitch -> skipped sub;
+        # Fetch -> failed collection (same semantics as before).
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind ContainerRegistries
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { continue }
+            Write-AuditLog -Message "Failed to check Container Registry security in subscription $($sub.Name): registry collection failed" -Level ERROR
+            continue
+        }
+
+        # Nested per-registry detail calls below need this subscription's
+        # context (free no-op after a fresh fetch, required on cache hits).
+        if (@($inv.Items).Count -gt 0 -and -not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+            continue
+        }
+
         try {
-            $registries = Invoke-AzureCommand -Command {
-                Get-AzContainerRegistry -ErrorAction Stop
-            } -CommandName "Get-ContainerRegistries"
-            
-            foreach ($acr in $registries) {
+            foreach ($acr in $inv.Items) {
                 $config = Invoke-AzureCommand -Command {
                     Get-AzContainerRegistry -ResourceGroupName $acr.ResourceGroupName -Name $acr.Name -ErrorAction Stop
                 } -CommandName "Get-ContainerRegistryDetails"
@@ -384,22 +393,30 @@ function Test-VMMonitoringAgents {
     
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
+
         Write-Progress -Activity "Checking VM monitoring agents" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
-        
+
+        # Perf phase: shared per-run inventory (the VirtualMachines kind
+        # includes -Status data). ContextSwitch -> skipped sub; Fetch ->
+        # failed collection (same semantics as before).
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind VirtualMachines
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { continue }
+            Write-AuditLog -Message "Failed to check VM monitoring agents in subscription $($sub.Name): VM collection failed" -Level ERROR
+            continue
+        }
+
+        # Nested per-VM extension calls below need this subscription's
+        # context (free no-op after a fresh fetch, required on cache hits).
+        if (@($inv.Items).Count -gt 0 -and -not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+            continue
+        }
+
         try {
-            $vms = Invoke-AzureCommand -Command {
-                Get-AzVM -Status -ErrorAction Stop
-            } -CommandName "Get-VMs"
-            
-            foreach ($vm in $vms) {
+            foreach ($vm in $inv.Items) {
                 $extensions = Invoke-AzureCommand -Command {
                     Get-AzVMExtension -ResourceGroupName $vm.ResourceGroupName -VMName $vm.Name -ErrorAction SilentlyContinue
                 } -CommandName "Get-VMExtensions"
@@ -456,22 +473,29 @@ function Test-AppServiceSecurity {
     
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
+
         Write-Progress -Activity "Checking App Service security" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
-        
+
+        # Perf phase: shared per-run inventory. ContextSwitch -> skipped sub;
+        # Fetch -> failed collection (same semantics as before).
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind WebApps
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { continue }
+            Write-AuditLog -Message "Failed to check App Service security in subscription $($sub.Name): web app collection failed" -Level ERROR
+            continue
+        }
+
+        # Nested per-app auth setting calls below need this subscription's
+        # context (free no-op after a fresh fetch, required on cache hits).
+        if (@($inv.Items).Count -gt 0 -and -not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+            continue
+        }
+
         try {
-            $apps = Invoke-AzureCommand -Command {
-                Get-AzWebApp -ErrorAction Stop
-            } -CommandName "Get-WebApps"
-            
-            foreach ($app in $apps) {
+            foreach ($app in $inv.Items) {
                 $authSettings = Invoke-AzureCommand -Command {
                     Get-AzWebAppAuthSetting -ResourceGroupName $app.ResourceGroupName -Name $app.Name -ErrorAction SilentlyContinue
                 } -CommandName "Get-WebAppAuth"

@@ -44,6 +44,15 @@ function Initialize-AuditState {
         CheckRunTotal      = 0
         FindingConsoleSeen = @{}
 
+        # Performance timing (perf phase): phase-level durations in seconds
+        # (Discovery, Collection, Assessment, Export) and per-subscription
+        # collection time accumulated by the inventory cache. Per-check
+        # durations live on the execution records (DurationSeconds).
+        Timing = @{
+            Phases                  = [ordered]@{}
+            SubscriptionFetchSeconds = @{}
+        }
+
         # Footprint: normalized subscription list for error-message normalization.
         Subscriptions = @()
         # Environment footprint (Core/Footprint.ps1): subscriptions/RGs/resources/
@@ -116,6 +125,10 @@ function Initialize-AuditState {
         Cache = @{
             Subscriptions   = $null
             RBACAssignments = @{}
+            # Per-run inventory cache (Core/InventoryCache.ps1): key
+            # "<subscriptionId>|<Kind>" -> @{ Items; ProvenEmpty; Unavailable }.
+            # In-memory only, cleared at end of run; never written to disk.
+            ResourceLists   = @{}
             # Per-subscription flag: $true when an RBAC read could not be evaluated
             # (e.g. ARM RBAC unreadable). Lets RBAC checks emit NotEvaluated instead
             # of a misleading PASS when collection failed.

@@ -33,30 +33,43 @@ function Test-PublicExposureInventory {
     )
 
     foreach ($sub in @($Subscriptions)) {
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) { continue }
-
         $exposed  = [System.Collections.Generic.List[object]]::new()
         $failures = [System.Collections.Generic.List[string]]::new()
 
         # --- Public IPs ---
-        try {
-            foreach ($pip in @(Get-AzPublicIpAddress -ErrorAction Stop)) {
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind PublicIpAddresses
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { continue }
+            [void]$failures.Add('PublicIpAddress')
+        }
+        else {
+            foreach ($pip in @($inv.Items)) {
                 $exposed.Add([PSCustomObject]@{ ResourceType='PublicIP'; ResourceName="$($pip.Name)"; ResourceId="$($pip.Id)"; ExposureType='Public IP address'; PublicEndpoint="$($pip.IpAddress)"; RiskReason='Resource has a public IP allocation'; SourceLogic='Get-AzPublicIpAddress' })
             }
-        } catch { [void]$failures.Add('PublicIpAddress') }
+        }
 
         # --- Storage accounts (public network access) ---
-        try {
-            foreach ($sa in @(Get-AzStorageAccount -ErrorAction Stop)) {
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind StorageAccounts
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { continue }
+            [void]$failures.Add('StorageAccount')
+        }
+        else {
+            foreach ($sa in @($inv.Items)) {
                 if ("$($sa.PublicNetworkAccess)" -eq 'Enabled') {
                     $exposed.Add([PSCustomObject]@{ ResourceType='StorageAccount'; ResourceName="$($sa.StorageAccountName)"; ResourceId="$($sa.Id)"; ExposureType='Public network access'; PublicEndpoint=$null; RiskReason='Storage account public network access is enabled'; SourceLogic='Get-AzStorageAccount' })
                 }
             }
-        } catch { [void]$failures.Add('StorageAccount') }
+        }
 
         # --- NSG inbound sensitive ports from Internet ---
-        try {
-            foreach ($nsg in @(Get-AzNetworkSecurityGroup -ErrorAction Stop)) {
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind NetworkSecurityGroups
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { continue }
+            [void]$failures.Add('NetworkSecurityGroup')
+        }
+        else {
+            foreach ($nsg in @($inv.Items)) {
                 foreach ($rule in @($nsg.SecurityRules)) {
                     if ("$($rule.Access)" -ne 'Allow' -or "$($rule.Direction)" -ne 'Inbound') { continue }
                     $srcs = @()
@@ -73,31 +86,46 @@ function Test-PublicExposureInventory {
                     }
                 }
             }
-        } catch { [void]$failures.Add('NetworkSecurityGroup') }
+        }
 
         # --- App Services (HTTP allowed) ---
-        try {
-            foreach ($app in @(Get-AzWebApp -ErrorAction Stop)) {
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind WebApps
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { continue }
+            [void]$failures.Add('WebApp')
+        }
+        else {
+            foreach ($app in @($inv.Items)) {
                 $httpsOnly = $null
                 if ($app.PSObject.Properties.Name -contains 'HttpsOnly') { $httpsOnly = $app.HttpsOnly }
                 if ($httpsOnly -eq $false) {
                     $exposed.Add([PSCustomObject]@{ ResourceType='AppService'; ResourceName="$($app.Name)"; ResourceId="$($app.Id)"; ExposureType='HTTP allowed (HttpsOnly disabled)'; PublicEndpoint="$($app.DefaultHostName)"; RiskReason='App Service accepts plaintext HTTP'; SourceLogic='Get-AzWebApp' })
                 }
             }
-        } catch { [void]$failures.Add('WebApp') }
+        }
 
         # --- SQL servers (public network access) ---
-        try {
-            foreach ($sql in @(Get-AzSqlServer -ErrorAction Stop)) {
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind SqlServers
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { continue }
+            [void]$failures.Add('SqlServer')
+        }
+        else {
+            foreach ($sql in @($inv.Items)) {
                 if ("$($sql.PublicNetworkAccess)" -eq 'Enabled') {
                     $exposed.Add([PSCustomObject]@{ ResourceType='SqlServer'; ResourceName="$($sql.ServerName)"; ResourceId="$($sql.ResourceId)"; ExposureType='Public network access'; PublicEndpoint="$($sql.FullyQualifiedDomainName)"; RiskReason='SQL server public network access is enabled'; SourceLogic='Get-AzSqlServer' })
                 }
             }
-        } catch { [void]$failures.Add('SqlServer') }
+        }
 
         # --- Key Vaults (public network access / no firewall) ---
-        try {
-            foreach ($kv in @(Get-AzKeyVault -ErrorAction Stop)) {
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind KeyVaults
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { continue }
+            [void]$failures.Add('KeyVault')
+        }
+        else {
+            foreach ($kv in @($inv.Items)) {
                 $pna = $null
                 if ($kv.PSObject.Properties.Name -contains 'PublicNetworkAccess') { $pna = "$($kv.PublicNetworkAccess)" }
                 $acls = $null
@@ -107,7 +135,7 @@ function Test-PublicExposureInventory {
                     $exposed.Add([PSCustomObject]@{ ResourceType='KeyVault'; ResourceName="$($kv.VaultName)"; ResourceId="$($kv.ResourceId)"; ExposureType='Public network access'; PublicEndpoint=$null; RiskReason='Key Vault reachable from public networks (no deny firewall)'; SourceLogic='Get-AzKeyVault' })
                 }
             }
-        } catch { [void]$failures.Add('KeyVault') }
+        }
 
         $deduped = @($exposed | Sort-Object ResourceId, ExposureType -Unique)
 

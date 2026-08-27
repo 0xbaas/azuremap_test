@@ -591,7 +591,13 @@ function Test-CustomRoles {
             $customRoles = Invoke-AzureCommand -Command {
                 Get-AzRoleDefinition -Custom -ErrorAction SilentlyContinue -WarningAction SilentlyContinue | Where-Object { $_.IsCustom -eq $true }
             } -CommandName "Get-CustomRoles"
-            
+
+            # Perf phase: reuse the cached subscription-scope RBAC read (shared with
+            # IDENTITY-002/003/006) instead of one server-filtered Get-AzRoleAssignment
+            # call per dangerous custom role. The cached list covers the subscription
+            # scope and below, so a client-side RoleDefinitionId filter is equivalent.
+            $subAssignments = @(Get-SubscriptionRBACAssignments -SubscriptionId $sub.Id -SubscriptionName $sub.Name)
+
             foreach ($role in $customRoles) {
                 $dangerousActions = @()
                 foreach ($action in $role.Actions) {
@@ -615,9 +621,12 @@ function Test-CustomRoles {
                 }
                 
                 if ($dangerousActions.Count -gt 0) {
-                    $assignmentsCount = Invoke-AzureCommand -Command {
-                        (Get-AzRoleAssignment -Scope "/subscriptions/$($sub.Id)" -RoleDefinitionId $role.Id -ErrorAction SilentlyContinue -WarningAction SilentlyContinue | Measure-Object).Count
-                    } -CommandName "Get-CustomRoleAssignments"
+                    # RoleDefinitionId may be a bare GUID or a full resource id;
+                    # compare on the GUID segment only.
+                    $roleGuid = ("$($role.Id)" -split '/')[-1]
+                    $assignmentsCount = @($subAssignments | Where-Object {
+                        ("$($_.RoleDefinitionId)" -split '/')[-1] -eq $roleGuid
+                    }).Count
                     
                     $findings.Add([PSCustomObject]@{
                         SubscriptionId = $sub.Id
@@ -699,24 +708,8 @@ function Test-IdentityResourceMapping {
     $discovered = 0
     $evaluated  = 0
 
-    # Sanitized one-line error detail (class + first line only) - full stack stays
-    # out of the console; the log keeps the short reason, not the raw dump.
-    $getReason = {
-        param($Err)
-        $cls = 'Unknown'
-        try { $cls = (Get-ErrorClass -ErrorRecord $Err).Class } catch {}
-        $msg = "Line 1: $(("$($Err.Exception.Message)" -split '\r?\n')[0])"
-        "$cls - $msg"
-    }
-
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            $subsSkipped.Add($sub.Name)
-            continue
-        }
-        $subsEvaluated.Add($sub.Name)
-
         Write-Progress -Activity "Checking managed identity risk mapping" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
@@ -724,53 +717,72 @@ function Test-IdentityResourceMapping {
 
         # Each resource type is collected independently: one failing type degrades
         # coverage to Partial for that subscription instead of sinking all evidence.
+        # Perf phase: lists come from the shared per-run inventory cache; role
+        # assignments come from the cached subscription-scope RBAC read (shared
+        # with IDENTITY-002/003/005) instead of one Get-AzRoleAssignment -ObjectId
+        # call PER identity-bearing resource. The per-resource -ObjectId calls
+        # were the run's worst denied-call pattern: each one burned 40-78s in
+        # Graph principal-resolution latency under Azure-only auth. A sub-scope
+        # -Scope read returns assignments at and below the subscription, so
+        # filtering client-side by principal ObjectId is equivalent.
         $resourceSets = @(
-            @{ Name = 'App Service';  CommandName = 'Get-WebApps';
-               Collect = { Get-AzWebApp -ErrorAction Stop };
+            @{ Name = 'App Service';  Kind = 'WebApps';
                BadRoles = @("Owner", "Contributor", "User Access Administrator") },
-            @{ Name = 'Virtual Machine'; CommandName = 'Get-VMs';
-               Collect = { Get-AzVM -ErrorAction Stop };
+            @{ Name = 'Virtual Machine'; Kind = 'VirtualMachines';
                BadRoles = @("Owner", "Contributor", "Virtual Machine Contributor") },
             # Managed-identity mapping only needs $func.Identity.PrincipalId, which
             # Get-AzFunctionApp returns without any app-settings/secret access.
-            @{ Name = 'Function App'; CommandName = 'Get-FunctionApps';
-               Collect = { Get-AzFunctionApp -ErrorAction Stop -WarningAction SilentlyContinue };
+            @{ Name = 'Function App'; Kind = 'FunctionApps';
                BadRoles = @("Owner", "Contributor") }
         )
 
+        $rbacFetched     = $false
+        $rbacAssignments = @()
+        $rbacDenied      = $false
+
         foreach ($set in $resourceSets) {
-            $resources = $null
-            try {
-                $resources = Invoke-AzureCommand -Command $set.Collect -CommandName $set.CommandName
-            }
-            catch {
+            $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind $set.Kind
+            if ($inv.Unavailable) {
+                if ($inv.UnavailableReason -eq 'ContextSwitch') {
+                    # Old ctx-fail semantics: whole subscription skipped.
+                    if (-not $subsSkipped.Contains($sub.Name)) { $subsSkipped.Add($sub.Name) }
+                    break
+                }
                 $failures.Add([PSCustomObject]@{
                     SubscriptionName = $sub.Name
                     ResourceType     = $set.Name
-                    Reason           = (& $getReason $_)
+                    Reason           = 'Collection failed (inventory fetch failed; detail in audit log)'
                 })
                 continue
             }
+            if (-not $subsEvaluated.Contains($sub.Name)) { $subsEvaluated.Add($sub.Name) }
 
-            foreach ($res in @($resources)) {
+            foreach ($res in @($inv.Items)) {
                 $discovered++
                 if (-not ($res.Identity -and $res.Identity.PrincipalId)) { $evaluated++; continue }
 
-                $assignments = $null
-                try {
-                    $assignments = Invoke-AzureCommand -Command {
-                        Get-AzRoleAssignment -ObjectId "$($res.Identity.PrincipalId)" -ErrorAction Stop
-                    } -CommandName "Get-RoleAssignments-ByIdentity"
+                # Lazy, once-per-subscription RBAC read (cached across checks).
+                if (-not $rbacFetched) {
+                    $rbacFetched = $true
+                    $rbacAssignments = @(Get-SubscriptionRBACAssignments -SubscriptionId $sub.Id -SubscriptionName $sub.Name)
+                    $rbacDenied = ($script:State.Cache.ContainsKey('RBACUnavailable') -and
+                                   $script:State.Cache.RBACUnavailable.ContainsKey($sub.Id) -and
+                                   $script:State.Cache.RBACUnavailable[$sub.Id])
                 }
-                catch {
+                if ($rbacDenied) {
+                    # Denied-call guard: classify once per subscription instead of
+                    # failing (and stalling) once per resource.
                     $failures.Add([PSCustomObject]@{
                         SubscriptionName = $sub.Name
                         ResourceType     = $set.Name
                         ResourceName     = "$($res.Name)"
-                        Reason           = (& $getReason $_)
+                        Reason           = 'Authentication - RBAC assignments unreadable under current auth (subscription-level read denied)'
                     })
                     continue
                 }
+
+                $principalId = "$($res.Identity.PrincipalId)"
+                $assignments = @($rbacAssignments | Where-Object { "$($_.ObjectId)" -eq $principalId })
                 $evaluated++
 
                 foreach ($assignment in @($assignments)) {

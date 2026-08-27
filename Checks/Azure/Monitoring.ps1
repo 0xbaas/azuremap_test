@@ -23,59 +23,79 @@ function Test-CriticalResourceDiagnostics {
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
         
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
         Write-Progress -Activity "Checking diagnostic settings" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
         
-        try {
-            $keyVaults = Invoke-AzureCommand -Command {
-                Get-AzKeyVault -ErrorAction SilentlyContinue
-            } -CommandName "Get-KeyVaults"
-            
-            foreach ($kv in $keyVaults) {
-                $diag = Invoke-AzureCommand -Command {
-                    Get-AzDiagnosticSetting -ResourceId $kv.ResourceId -ErrorAction SilentlyContinue
-                } -CommandName "Get-DiagnosticsKeyVault"
-                
-                if (-not $diag) {
-                    $findings.Add([PSCustomObject]@{
-                        SubscriptionId = $sub.Id
-                        SubscriptionName = $sub.Name
-                        ResourceType = "KeyVault"
-                        ResourceName = $kv.VaultName
-                        ResourceGroup = $kv.ResourceGroupName
-                    })
-                }
+        # Two independent collections: a failure in one must not suppress the other.
+        $invKv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind KeyVaults
+        if ($invKv.Unavailable) {
+            if ($invKv.UnavailableReason -eq 'ContextSwitch') { continue }
+            Write-AuditLog -Message "Failed to check diagnostic settings in subscription $($sub.Name): KeyVaults inventory fetch failed" -Level ERROR
+        }
+        else {
+            # Per-vault diagnostic settings still need the session on this
+            # subscription (deduped no-op right after a fresh fetch).
+            if (@($invKv.Items).Count -gt 0 -and -not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+                continue
             }
             
-            $sqlServers = Invoke-AzureCommand -Command {
-                Get-AzSqlServer -ErrorAction SilentlyContinue
-            } -CommandName "Get-SqlServers"
-            
-            foreach ($sql in $sqlServers) {
-                $resourceId = "/subscriptions/$($sub.Id)/resourceGroups/$($sql.ResourceGroupName)/providers/Microsoft.Sql/servers/$($sql.ServerName)"
-                $diag = Invoke-AzureCommand -Command {
-                    Get-AzDiagnosticSetting -ResourceId $resourceId -ErrorAction SilentlyContinue
-                } -CommandName "Get-DiagnosticsSql"
-                
-                if (-not $diag) {
-                    $findings.Add([PSCustomObject]@{
-                        SubscriptionId = $sub.Id
-                        SubscriptionName = $sub.Name
-                        ResourceType = "SQLServer"
-                        ResourceName = $sql.ServerName
-                        ResourceGroup = $sql.ResourceGroupName
-                    })
+            try {
+                foreach ($kv in $invKv.Items) {
+                    $diag = Invoke-AzureCommand -Command {
+                        Get-AzDiagnosticSetting -ResourceId $kv.ResourceId -ErrorAction SilentlyContinue
+                    } -CommandName "Get-DiagnosticsKeyVault"
+                    
+                    if (-not $diag) {
+                        $findings.Add([PSCustomObject]@{
+                            SubscriptionId = $sub.Id
+                            SubscriptionName = $sub.Name
+                            ResourceType = "KeyVault"
+                            ResourceName = $kv.VaultName
+                            ResourceGroup = $kv.ResourceGroupName
+                        })
+                    }
                 }
+            }
+            catch {
+                Write-AuditLog -Message "Failed to check diagnostic settings in subscription $($sub.Name): $_" -Level ERROR
             }
         }
-        catch {
-            Write-AuditLog -Message "Failed to check diagnostic settings in subscription $($sub.Name): $_" -Level ERROR
+        
+        $invSql = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind SqlServers
+        if ($invSql.Unavailable) {
+            if ($invSql.UnavailableReason -eq 'ContextSwitch') { continue }
+            Write-AuditLog -Message "Failed to check diagnostic settings in subscription $($sub.Name): SqlServers inventory fetch failed" -Level ERROR
+        }
+        else {
+            # Per-server diagnostic settings still need the session on this
+            # subscription (deduped no-op right after a fresh fetch).
+            if (@($invSql.Items).Count -gt 0 -and -not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+                continue
+            }
+            
+            try {
+                foreach ($sql in $invSql.Items) {
+                    $resourceId = "/subscriptions/$($sub.Id)/resourceGroups/$($sql.ResourceGroupName)/providers/Microsoft.Sql/servers/$($sql.ServerName)"
+                    $diag = Invoke-AzureCommand -Command {
+                        Get-AzDiagnosticSetting -ResourceId $resourceId -ErrorAction SilentlyContinue
+                    } -CommandName "Get-DiagnosticsSql"
+                    
+                    if (-not $diag) {
+                        $findings.Add([PSCustomObject]@{
+                            SubscriptionId = $sub.Id
+                            SubscriptionName = $sub.Name
+                            ResourceType = "SQLServer"
+                            ResourceName = $sql.ServerName
+                            ResourceGroup = $sql.ResourceGroupName
+                        })
+                    }
+                }
+            }
+            catch {
+                Write-AuditLog -Message "Failed to check diagnostic settings in subscription $($sub.Name): $_" -Level ERROR
+            }
         }
     }
     
@@ -109,21 +129,27 @@ function Test-ResourceLocks {
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
         
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
         Write-Progress -Activity "Checking resource locks" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
         
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind ResourceGroups
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'Fetch') {
+                Write-AuditLog -Message "Failed to check resource locks in subscription $($sub.Name): inventory fetch failed" -Level ERROR
+            }
+            continue
+        }
+        
+        # Per-RG lock reads still need the session on this subscription
+        # (deduped no-op right after a fresh fetch).
+        if (@($inv.Items).Count -gt 0 -and -not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+            continue
+        }
+        
         try {
-            $resourceGroups = Invoke-AzureCommand -Command {
-                Get-AzResourceGroup -ErrorAction Stop
-            } -CommandName "Get-ResourceGroups"
-            
-            foreach ($rg in $resourceGroups) {
+            foreach ($rg in $inv.Items) {
                 $isCritical = $false
                 foreach ($pattern in $criticalPatterns) {
                     if ($rg.ResourceGroupName -like $pattern) { $isCritical = $true; break }
@@ -188,22 +214,28 @@ function Test-AutomationRunAsAccounts {
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
         
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
         Write-Progress -Activity "Checking Automation RunAs accounts" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
         
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind AutomationAccounts
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'Fetch') {
+                Write-AuditLog -Message "Failed to check Automation RunAs accounts in subscription $($sub.Name): inventory fetch failed" -Level ERROR
+            }
+            continue
+        }
+        $evaluatedSubs++
+        
+        # Per-account connection reads still need the session on this
+        # subscription (deduped no-op right after a fresh fetch).
+        if (@($inv.Items).Count -gt 0 -and -not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+            continue
+        }
+        
         try {
-            $accounts = Invoke-AzureCommand -Command {
-                Get-AzAutomationAccount -ErrorAction Stop
-            } -CommandName "Get-AutomationAccounts"
-            $evaluatedSubs++
-            
-            foreach ($account in $accounts) {
+            foreach ($account in $inv.Items) {
                 $runAsAccounts = Invoke-AzureCommand -Command {
                     Get-AzAutomationConnection -ResourceGroupName $account.ResourceGroupName `
                                                -AutomationAccountName $account.AutomationAccountName `

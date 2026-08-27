@@ -60,6 +60,45 @@ Current architectural weakness:
 
 Coverage and Status are not yet strongly linked.
 
+## Perf phase: inventory cache, proven-empty gating, timing
+
+Per-run inventory cache (Core/InventoryCache.ps1):
+
+- Get-SubscriptionInventory -Kind <Kind> returns @{ Items; ProvenEmpty;
+  Unavailable; UnavailableReason ('ContextSwitch'|'Fetch'); FromCache } for a
+  (subscription, kind) pair, fetched at most once per run and shared by all
+  checks (e.g. one Get-AzStorageAccount enumeration serves all six storage
+  checks). In-memory only (State.Cache.ResourceLists); never written to disk.
+- $script:InventoryKindMap maps each kind to its ARM types and its read-only
+  Get-* list call. StorageAccounts includes AccountSasPolicy when supported
+  (superset); VirtualMachines uses Get-AzVM -Status (superset).
+- Proven-empty gating: when the footprint is Complete/High-confidence AND
+  Footprint.TypeCountsBySub (subId -> type -> count, built by both the ARG and
+  Get-AzResource footprint paths) proves the kind absent in that subscription,
+  enumeration is skipped entirely (no context switch, no ARM call). Any doubt
+  (partial/low-confidence footprint, subscription missing from per-sub data)
+  means enumerate. Semantically identical to a successful empty list.
+- Failure records are cached too (denied-call guard): a failed fetch or
+  context switch is classified once per (subscription, kind) and never
+  retried; callers map UnavailableReason to the old ctx-fail vs
+  collection-failed coverage paths.
+- Checks with nested per-resource Az calls still call Set-SubscriptionContext
+  after reading inventory (required on cache hits); Set-SubscriptionContext is
+  deduped via Get-AzContext, so it is a no-op when the session is already on
+  the target subscription.
+- RBAC: IDENTITY-005/006 reuse the cached subscription-scope RBAC read
+  (Get-SubscriptionRBACAssignments) with client-side ObjectId/RoleDefinitionId
+  filters instead of per-resource/per-role Get-AzRoleAssignment calls.
+
+Timing (State.Timing, Get-PerformanceSummary in Core/Logging.ps1):
+
+- Per-check DurationSeconds on execution records (Complete-CheckExecutionRecord).
+- Phase totals (Discovery/Collection/Assessment/Export) and per-subscription
+  collection seconds (State.Timing.SubscriptionFetchSeconds).
+- CLI summary gains a Performance section (phases, slowest checks top 10,
+  slowest subscriptions top 10, total runtime); JSON gains a Performance
+  block. HTML/console finding rendering is unchanged.
+
 
 
 ## Phase B1: Status x Coverage contract

@@ -21,6 +21,7 @@ function Show-AuditSummary {
     $results = $script:State.Results
 
     # ---- Export phase (HTML styling untouched) ----
+    $exportStart  = Get-Date
     $baseName     = "AzureSecurityAudit-$($script:State.Timestamp)"
     $createdFiles = [System.Collections.Generic.List[string]]::new()
     $formats      = $script:State.Config.ExportFormats
@@ -43,6 +44,8 @@ function Show-AuditSummary {
             }
         }
     }
+
+    $script:State.Timing.Phases['Export'] = [Math]::Round(((Get-Date) - $exportStart).TotalSeconds, 1)
 
     # ---- Clean console summary ----
     if (Get-Command -Name "Show-AuditConsole" -ErrorAction SilentlyContinue) {

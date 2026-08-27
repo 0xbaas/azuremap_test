@@ -54,6 +54,9 @@ BeforeAll {
     function Write-Progress          { param([string]$Activity, [string]$Status, $PercentComplete, $Id) }
     function Get-SafeProgressPercent { param($Current, $Total) return 0 }
     function Get-SubscriptionRBACAssignments { param($SubscriptionId, $SubscriptionName) return $script:RoleAssignments }
+    # Minimal stand-in for Core/CheckRegistry.ps1's helper (used by InventoryCache);
+    # CheckRegistry itself is not sourced here because it would override the stubs above.
+    function ConvertTo-ScalarString { param([AllowNull()][object]$Value) if ($null -eq $Value) { return $null }; return [string]$Value }
 
     # Minimal audit-state shape used by checks that consult the RBAC-unavailable
     # cache (Identity.ps1). Merge into the Config hashtable above - production
@@ -108,6 +111,9 @@ BeforeAll {
         )
         return (& $Command)
     }
+
+    # Source the shared per-run inventory cache used by converted checks
+    . "$ProjectRoot\Core\InventoryCache.ps1"
 
     # Source all v2 check files
     $checkFiles = Get-ChildItem (Join-Path $ProjectRoot "Checks\Azure\*.ps1")

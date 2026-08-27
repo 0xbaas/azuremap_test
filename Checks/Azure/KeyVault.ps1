@@ -22,37 +22,35 @@ function Test-KeyVaultRBAC {
     
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
+
         Write-Progress -Activity "Checking Key Vault RBAC" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
-        
-        try {
-            $vaults = Invoke-AzureCommand -Command {
-                Get-AzKeyVault -ErrorAction Stop
-            } -CommandName "Get-KeyVaults"
-            
-            foreach ($kv in $vaults) {
-                if (-not $kv.EnableRbacAuthorization) {
-                    $findings.Add([PSCustomObject]@{
-                        SubscriptionId = $sub.Id
-                        SubscriptionName = $sub.Name
-                        ResourceGroup = $kv.ResourceGroupName
-                        VaultName = $kv.VaultName
-                        EnableRbacAuthorization = $kv.EnableRbacAuthorization
-                        ResourceId = $kv.ResourceId
-                        Tags = $kv.Tags
-                    })
-                }
+
+        # Perf phase: shared per-run inventory (one Get-AzKeyVault enumeration
+        # per subscription across ALL key vault checks). ContextSwitch ->
+        # skipped sub; Fetch -> failed collection (same semantics as before).
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind KeyVaults
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'Fetch') {
+                Write-AuditLog -Message "Failed to check Key Vault RBAC in subscription $($sub.Name): inventory fetch failed" -Level ERROR
             }
+            continue
         }
-        catch {
-            Write-AuditLog -Message "Failed to check Key Vault RBAC in subscription $($sub.Name): $_" -Level ERROR
+
+        foreach ($kv in $inv.Items) {
+            if (-not $kv.EnableRbacAuthorization) {
+                $findings.Add([PSCustomObject]@{
+                    SubscriptionId = $sub.Id
+                    SubscriptionName = $sub.Name
+                    ResourceGroup = $kv.ResourceGroupName
+                    VaultName = $kv.VaultName
+                    EnableRbacAuthorization = $kv.EnableRbacAuthorization
+                    ResourceId = $kv.ResourceId
+                    Tags = $kv.Tags
+                })
+            }
         }
     }
     
@@ -88,90 +86,89 @@ function Test-KeyVaultNetworkSecurity {
     
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
+
         Write-Progress -Activity "Checking Key Vault Network Security" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
-        
-        try {
-            $vaults = Invoke-AzureCommand -Command {
-                Get-AzKeyVault -ErrorAction Stop
-            } -CommandName "Get-KeyVaults"
-            
-            foreach ($kv in $vaults) {
-                $networkRuleSet = $kv.NetworkAcls
-                $hasFirewall = $false
-                $publicAccess = $true
-                
-                if ($networkRuleSet) {
-                    if ($networkRuleSet.DefaultAction -eq "Deny") {
-                        $publicAccess = $false
-                        $hasFirewall = $true
-                    }
-                    if ($networkRuleSet.IpAddressRanges -and $networkRuleSet.IpAddressRanges.Count -gt 0) {
-                        $hasFirewall = $true
-                    }
-                    if ($networkRuleSet.VirtualNetworkResourceIds -and $networkRuleSet.VirtualNetworkResourceIds.Count -gt 0) {
-                        $hasFirewall = $true
-                    }
+
+        # Perf phase: shared per-run inventory. ContextSwitch -> skipped sub;
+        # Fetch -> failed collection (same semantics as before).
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind KeyVaults
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'Fetch') {
+                Write-AuditLog -Message "Failed to check Key Vault network security in subscription $($sub.Name): inventory fetch failed" -Level ERROR
+            }
+            continue
+        }
+
+        # Private endpoints from shared inventory (was a per-vault
+        # Get-AzPrivateEndpoint -ResourceGroupName call). A fetch failure
+        # degrades to "no private endpoints seen", matching the old per-vault
+        # try/catch -> @() behavior.
+        $peInv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind PrivateEndpoints
+        $allPrivateEndpoints = @()
+        if (-not $peInv.Unavailable) { $allPrivateEndpoints = @($peInv.Items) }
+
+        foreach ($kv in $inv.Items) {
+            $networkRuleSet = $kv.NetworkAcls
+            $hasFirewall = $false
+            $publicAccess = $true
+
+            if ($networkRuleSet) {
+                if ($networkRuleSet.DefaultAction -eq "Deny") {
+                    $publicAccess = $false
+                    $hasFirewall = $true
                 }
-                
-                $privateEndpoints = @()
-                try {
-                    $privateEndpoints = Invoke-AzureCommand -Command {
-                        Get-AzPrivateEndpoint -ResourceGroupName $kv.ResourceGroupName -ErrorAction SilentlyContinue |
-                            Where-Object { $_.PrivateLinkServiceConnections.PrivateLinkServiceId -eq $kv.ResourceId }
-                    } -CommandName "Get-KeyVaultPrivateEndpoints"
+                if ($networkRuleSet.IpAddressRanges -and $networkRuleSet.IpAddressRanges.Count -gt 0) {
+                    $hasFirewall = $true
                 }
-                catch {
-                    $privateEndpoints = @()
-                }
-                
-                if ($publicAccess -and -not $hasFirewall) {
-                    $publicNoFirewall.Add([PSCustomObject]@{
-                        SubscriptionId = $sub.Id
-                        SubscriptionName = $sub.Name
-                        ResourceGroup = $kv.ResourceGroupName
-                        VaultName = $kv.VaultName
-                        ResourceId = $kv.ResourceId
-                        Tags = $kv.Tags
-                    })
-                }
-                
-                if (-not $kv.EnablePurgeProtection) {
-                    $missingPurgeProtection.Add([PSCustomObject]@{
-                        SubscriptionId = $sub.Id
-                        SubscriptionName = $sub.Name
-                        ResourceGroup = $kv.ResourceGroupName
-                        VaultName = $kv.VaultName
-                        ResourceId = $kv.ResourceId
-                        Tags = $kv.Tags
-                    })
-                }
-                
-                $isCritical = $false
-                foreach ($pattern in $criticalPatterns) {
-                    if ($kv.VaultName -like $pattern) { $isCritical = $true; break }
-                }
-                if ($isCritical -and ($privateEndpoints | Measure-Object).Count -eq 0) {
-                    $criticalNoPrivateEndpoint.Add([PSCustomObject]@{
-                        SubscriptionId = $sub.Id
-                        SubscriptionName = $sub.Name
-                        ResourceGroup = $kv.ResourceGroupName
-                        VaultName = $kv.VaultName
-                        ResourceId = $kv.ResourceId
-                        Tags = $kv.Tags
-                    })
+                if ($networkRuleSet.VirtualNetworkResourceIds -and $networkRuleSet.VirtualNetworkResourceIds.Count -gt 0) {
+                    $hasFirewall = $true
                 }
             }
-        }
-        catch {
-            Write-AuditLog -Message "Failed to check Key Vault network security in subscription $($sub.Name): $_" -Level ERROR
+
+            $privateEndpoints = @($allPrivateEndpoints | Where-Object {
+                $_.ResourceGroupName -eq $kv.ResourceGroupName -and
+                $_.PrivateLinkServiceConnections.PrivateLinkServiceId -eq $kv.ResourceId
+            })
+
+            if ($publicAccess -and -not $hasFirewall) {
+                $publicNoFirewall.Add([PSCustomObject]@{
+                    SubscriptionId = $sub.Id
+                    SubscriptionName = $sub.Name
+                    ResourceGroup = $kv.ResourceGroupName
+                    VaultName = $kv.VaultName
+                    ResourceId = $kv.ResourceId
+                    Tags = $kv.Tags
+                })
+            }
+
+            if (-not $kv.EnablePurgeProtection) {
+                $missingPurgeProtection.Add([PSCustomObject]@{
+                    SubscriptionId = $sub.Id
+                    SubscriptionName = $sub.Name
+                    ResourceGroup = $kv.ResourceGroupName
+                    VaultName = $kv.VaultName
+                    ResourceId = $kv.ResourceId
+                    Tags = $kv.Tags
+                })
+            }
+
+            $isCritical = $false
+            foreach ($pattern in $criticalPatterns) {
+                if ($kv.VaultName -like $pattern) { $isCritical = $true; break }
+            }
+            if ($isCritical -and ($privateEndpoints | Measure-Object).Count -eq 0) {
+                $criticalNoPrivateEndpoint.Add([PSCustomObject]@{
+                    SubscriptionId = $sub.Id
+                    SubscriptionName = $sub.Name
+                    ResourceGroup = $kv.ResourceGroupName
+                    VaultName = $kv.VaultName
+                    ResourceId = $kv.ResourceId
+                    Tags = $kv.Tags
+                })
+            }
         }
     }
     
@@ -241,88 +238,98 @@ function Test-KeyVaultSecretsExpiry {
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
 
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            $subsSkipped.Add($sub.Name)
-            continue
-        }
-        $subsEvaluated.Add($sub.Name)
-
         Write-Progress -Activity "Checking Key Vault secrets expiry" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
 
-        try {
-            $vaults = Invoke-AzureCommand -Command {
-                Get-AzKeyVault -ErrorAction Stop
-            } -CommandName "Get-KeyVaults"
+        # Perf phase: shared per-run inventory. ContextSwitch -> skipped sub;
+        # Fetch -> failed collection (same coverage semantics as before).
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind KeyVaults
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') {
+                $subsSkipped.Add($sub.Name)
+            }
+            else {
+                # Old "collection threw" path: the context switch had succeeded
+                # (sub counted evaluated) and then Get-AzKeyVault failed. The
+                # cache layer already logged the underlying error; it is not
+                # surfaced here, so the sanitized class stays 'Unknown'.
+                $subsEvaluated.Add($sub.Name)
+                $failures.Add([PSCustomObject]@{
+                    SubscriptionName = $sub.Name
+                    Reason           = "Vault collection failed (Unknown)"
+                })
+            }
+            continue
+        }
+        $subsEvaluated.Add($sub.Name)
 
-            foreach ($kv in @($vaults)) {
-                $vaultsDiscovered++
-                try {
-                    $secrets = Invoke-AzureCommand -Command {
-                        Get-AzKeyVaultSecret -VaultName $kv.VaultName -ErrorAction Stop
-                    } -CommandName "Get-KeyVaultSecrets"
-                    $vaultsEvaluated++
-                }
-                catch {
-                    # Sanitized: error class only - no caller identity, object ids, or
-                    # full Forbidden payloads on the console/log.
-                    $cls = 'Unknown'
-                    try { $cls = (Get-ErrorClass -ErrorRecord $_).Class } catch {}
-                    $failures.Add([PSCustomObject]@{
+        # Data-plane Get-AzKeyVaultSecret per vault still needs the session on
+        # this subscription (deduped no-op right after a fresh fetch; required
+        # on cache hits).
+        if (@($inv.Items).Count -gt 0 -and -not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+            $subsSkipped.Add($sub.Name)
+            continue
+        }
+
+        foreach ($kv in @($inv.Items)) {
+            $vaultsDiscovered++
+            try {
+                $secrets = Invoke-AzureCommand -Command {
+                    Get-AzKeyVaultSecret -VaultName $kv.VaultName -ErrorAction Stop
+                } -CommandName "Get-KeyVaultSecrets"
+                $vaultsEvaluated++
+            }
+            catch {
+                # Sanitized: error class only - no caller identity, object ids, or
+                # full Forbidden payloads on the console/log.
+                $cls = 'Unknown'
+                try { $cls = (Get-ErrorClass -ErrorRecord $_).Class } catch {}
+                $failures.Add([PSCustomObject]@{
+                    SubscriptionName = $sub.Name
+                    VaultName        = "$($kv.VaultName)"
+                    Reason           = "Secret metadata read denied/failed ($cls)"
+                })
+                continue
+            }
+
+            foreach ($secret in $secrets) {
+                if (-not $secret.Enabled) { continue }
+
+                $expiryDate = $secret.Expires
+                if (-not $expiryDate) {
+                    $noExpiry.Add([PSCustomObject]@{
+                        SubscriptionId = $sub.Id
                         SubscriptionName = $sub.Name
-                        VaultName        = "$($kv.VaultName)"
-                        Reason           = "Secret metadata read denied/failed ($cls)"
+                        VaultName = $kv.VaultName
+                        SecretName = $secret.Name
+                        CreatedDate = $secret.Created
                     })
                     continue
                 }
-                
-                foreach ($secret in $secrets) {
-                    if (-not $secret.Enabled) { continue }
-                    
-                    $expiryDate = $secret.Expires
-                    if (-not $expiryDate) {
-                        $noExpiry.Add([PSCustomObject]@{
-                            SubscriptionId = $sub.Id
-                            SubscriptionName = $sub.Name
-                            VaultName = $kv.VaultName
-                            SecretName = $secret.Name
-                            CreatedDate = $secret.Created
-                        })
-                        continue
-                    }
-                    
-                    $daysToExpiry = [math]::Round(($expiryDate - $now).TotalDays)
-                    if ($daysToExpiry -lt 0) {
-                        $expired.Add([PSCustomObject]@{
-                            SubscriptionId = $sub.Id
-                            SubscriptionName = $sub.Name
-                            VaultName = $kv.VaultName
-                            SecretName = $secret.Name
-                            DaysToExpiry = $daysToExpiry
-                            ExpiryDate = $expiryDate
-                        })
-                    } elseif ($daysToExpiry -gt $script:State.Config.LongCredentialDays) {
-                        $farFuture.Add([PSCustomObject]@{
-                            SubscriptionId = $sub.Id
-                            SubscriptionName = $sub.Name
-                            VaultName = $kv.VaultName
-                            SecretName = $secret.Name
-                            DaysToExpiry = $daysToExpiry
-                            ExpiryDate = $expiryDate
-                        })
-                    }
+
+                $daysToExpiry = [math]::Round(($expiryDate - $now).TotalDays)
+                if ($daysToExpiry -lt 0) {
+                    $expired.Add([PSCustomObject]@{
+                        SubscriptionId = $sub.Id
+                        SubscriptionName = $sub.Name
+                        VaultName = $kv.VaultName
+                        SecretName = $secret.Name
+                        DaysToExpiry = $daysToExpiry
+                        ExpiryDate = $expiryDate
+                    })
+                } elseif ($daysToExpiry -gt $script:State.Config.LongCredentialDays) {
+                    $farFuture.Add([PSCustomObject]@{
+                        SubscriptionId = $sub.Id
+                        SubscriptionName = $sub.Name
+                        VaultName = $kv.VaultName
+                        SecretName = $secret.Name
+                        DaysToExpiry = $daysToExpiry
+                        ExpiryDate = $expiryDate
+                    })
                 }
             }
-        }
-        catch {
-            $cls = 'Unknown'
-            try { $cls = (Get-ErrorClass -ErrorRecord $_).Class } catch {}
-            $failures.Add([PSCustomObject]@{
-                SubscriptionName = $sub.Name
-                Reason           = "Vault collection failed ($cls)"
-            })
         }
     }
 

@@ -618,6 +618,30 @@ function Show-AuditConsole {
         }
     }
 
+    # ---- Performance (clean totals; per-check detail is in JSON/log) ----
+    $perf = Get-PerformanceSummary -Top 10
+    Write-ConsoleLine ''
+    Write-ConsoleLine 'Performance' 'Cyan'
+    if ($perf.Phases.Count -gt 0) {
+        $phaseParts = @()
+        foreach ($pk in $perf.Phases.Keys) { $phaseParts += ("{0} {1}" -f $pk.ToLower(), (Format-UiDuration $perf.Phases[$pk])) }
+        Write-ConsoleLine ("  Phases              {0}" -f ($phaseParts -join '  ')) 'DarkGray'
+    }
+    if ($perf.SlowestChecks.Count -gt 0) {
+        Write-ConsoleLine '  Slowest checks' 'DarkGray'
+        foreach ($sc in $perf.SlowestChecks) {
+            $dispName = Get-CheckDisplayName -Check $sc
+            Write-ConsoleLine ("    {0,-9} {1,-38} {2}" -f $sc.CheckId, $dispName, (Format-UiDuration $sc.DurationSeconds)) 'DarkGray'
+        }
+    }
+    if ($perf.SlowestSubscriptions.Count -gt 0) {
+        Write-ConsoleLine '  Slowest subscriptions (collection)' 'DarkGray'
+        foreach ($ss in $perf.SlowestSubscriptions) {
+            Write-ConsoleLine ("    {0,-48} {1}" -f $ss.Subscription, (Format-UiDuration $ss.FetchSeconds)) 'DarkGray'
+        }
+    }
+    Write-ConsoleLine ("  Total runtime       {0}" -f (Format-UiDuration $perf.TotalSeconds)) 'DarkGray'
+
     # ---- Exported Files ----
     Write-ConsoleLine ''
     Write-ConsoleLine 'Exports' 'Cyan'

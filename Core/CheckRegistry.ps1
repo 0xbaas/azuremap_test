@@ -840,6 +840,16 @@ function Set-SubscriptionContext {
         return $false
     }
 
+    # Perf phase: skip the switch when the session is already on the target
+    # subscription. Get-AzContext is a local read (no ARM call); Set-AzContext
+    # costs ~0.5s each and was being called once per check per subscription
+    # (~1,900 times per run).
+    $currentCtx = Get-AzContext -ErrorAction SilentlyContinue
+    if ($currentCtx -and $currentCtx.Subscription -and
+        "$($currentCtx.Subscription.Id)" -eq $SubscriptionId) {
+        return $true
+    }
+
     try {
         $ctxParams = @{
             SubscriptionId = $SubscriptionId
@@ -1204,7 +1214,7 @@ function Invoke-AuditChecks {
         if (($SkipEntra -and $check.Category -eq 'Entra') -or ($EntraOnly -and $check.Category -ne 'Entra')) {
             $rec.Status      = 'Skipped'
             $rec.Detail      = if ($check.Category -eq 'Entra') { 'Entra checks disabled by -SkipEntra' } else { 'Azure checks disabled by -EntraOnly' }
-            $rec.CompletedAt = Get-Date
+            Complete-CheckExecutionRecord -Record $rec
             $script:State.ExecutedChecks.Add($rec)
             $script:State.CheckRunIndex++
             $lineIdx = if ($script:State.CheckRunTotal -gt 0) { $script:State.CheckRunIndex } else { $index }
@@ -1220,7 +1230,7 @@ function Invoke-AuditChecks {
         if ($missingModules.Count -gt 0) {
             $rec.Status      = 'Skipped'
             $rec.Detail      = "Required module(s) not installed: $($missingModules -join ', ')"
-            $rec.CompletedAt = Get-Date
+            Complete-CheckExecutionRecord -Record $rec
             $script:State.ExecutedChecks.Add($rec)
             Write-AuditLog -Message "Skipping check $($check.CheckId): $($rec.Detail)" -Level WARN
             $script:State.CheckRunIndex++
@@ -1238,7 +1248,7 @@ function Invoke-AuditChecks {
         if (-not $applic.Applicable) {
             $rec.Status      = 'NotApplicable'
             $rec.Detail      = $applic.Reason
-            $rec.CompletedAt = Get-Date
+            Complete-CheckExecutionRecord -Record $rec
             $script:State.ExecutedChecks.Add($rec)
             $script:State.CheckRunIndex++
             $lineIdx = if ($script:State.CheckRunTotal -gt 0) { $script:State.CheckRunIndex } else { $index }
@@ -1256,7 +1266,7 @@ function Invoke-AuditChecks {
         if ($check.RequiresDataPlane -and -not $script:State.Config.IncludeDataPlane) {
             $rec.Status      = 'Skipped'
             $rec.Detail      = 'Data-plane checks disabled'
-            $rec.CompletedAt = Get-Date
+            Complete-CheckExecutionRecord -Record $rec
             $script:State.ExecutedChecks.Add($rec)
             Write-AuditLog -Message "Skipping check $($check.CheckId): requires data-plane access; -IncludeDataPlane not set." -Level INFO
             $script:State.CheckRunIndex++
@@ -1318,7 +1328,8 @@ function Invoke-AuditChecks {
             }
         }
         finally {
-            $rec.CompletedAt = Get-Date
+            Complete-CheckExecutionRecord -Record $rec
+            Write-AuditLog -Message ("Check {0} finished in {1:n1}s (status: {2})" -f $check.CheckId, $rec.DurationSeconds, $rec.Status) -Level DEBUG
             # Phase B1: an unresolved record is NOT a Pass. If execution ended without
             # a resolved status, the check proved nothing -> NotEvaluated.
             if ($rec.Status -eq 'Pending') {

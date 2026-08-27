@@ -9,6 +9,8 @@ BeforeAll {
     . "$projectRoot\Core\Logging.ps1"
     . "$projectRoot\Core\Exclusions.ps1"
     . "$projectRoot\Core\CheckRegistry.ps1"
+    . "$projectRoot\Core\Retry.ps1"
+    . "$projectRoot\Core\InventoryCache.ps1"
     . "$projectRoot\Checks\Azure\Exposure.ps1"
 
     $script:State = Initialize-AuditState
@@ -26,6 +28,9 @@ BeforeAll {
 Describe "AZURE-EXPOSURE-001 Public exposure inventory" {
     BeforeEach {
         $script:State.Results.Clear()
+        # Per-test isolation: State is created once in BeforeAll, so the per-run
+        # inventory cache must be reset explicitly between tests.
+        $script:State.Cache.ResourceLists = @{}
         Mock Set-SubscriptionContext { $true }
         Mock Get-AzPublicIpAddress { @() }
         Mock Get-AzStorageAccount { @() }

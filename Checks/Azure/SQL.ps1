@@ -22,22 +22,27 @@ function Test-SQLDatabaseSecurity {
     
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
+
         Write-Progress -Activity "Checking SQL basic security" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
-        
+
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind SqlServers
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { continue }
+            Write-AuditLog -Message "Failed to check SQL basic security in subscription $($sub.Name): SQL server enumeration failed" -Level ERROR
+            continue
+        }
+
+        # Per-server audit reads still need the session on this subscription
+        # (deduped no-op right after a fresh fetch).
+        if (@($inv.Items).Count -gt 0 -and -not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+            continue
+        }
+
         try {
-            $servers = Invoke-AzureCommand -Command {
-                Get-AzSqlServer -ErrorAction Stop
-            } -CommandName "Get-SqlServers"
-            
-            foreach ($server in $servers) {
+            foreach ($server in $inv.Items) {
                 $auditing = Invoke-AzureCommand -Command {
                     Get-AzSqlServerAudit -ResourceGroupName $server.ResourceGroupName -ServerName $server.ServerName -ErrorAction SilentlyContinue
                 } -CommandName "Get-SqlAuditing"
@@ -107,23 +112,28 @@ function Test-SQLAdvancedSecurity {
     $totalProcessed = 0
     
     foreach ($sub in $Subscriptions) {
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
         Write-Progress -Activity "Checking SQL Advanced Security" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
-        
+
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind SqlServers
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { continue }
+            Write-AuditLog -Message "Failed to check SQL security in subscription $($sub.Name): SQL server enumeration failed" -Level ERROR
+            continue
+        }
+
+        $totalProcessed++
+
+        # Per-server AAD-admin/TDE reads still need the session on this
+        # subscription (deduped no-op right after a fresh fetch).
+        if (@($inv.Items).Count -gt 0 -and -not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+            continue
+        }
+
         try {
-            $sqlServers = Invoke-AzureCommand -Command { 
-                Get-AzSqlServer -ErrorAction Stop
-            } -CommandName "Get-SQLServers" -SkipContextCheck -Critical
-            
-            $totalProcessed++
-            
-            foreach ($server in $sqlServers) {
+            foreach ($server in $inv.Items) {
                 $serverFindings = @()
                 $severity = "MEDIUM"
                 

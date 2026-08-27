@@ -33,22 +33,28 @@ function Test-EventHubPublicAccess {
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
         
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
         Write-Progress -Activity "Checking Event Hub network rules" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
         
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind EventHubNamespaces
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'Fetch') {
+                Write-AuditLog -Message "Failed to check Event Hub network rules in subscription $($sub.Name): inventory fetch failed" -Level ERROR
+            }
+            continue
+        }
+        $evaluatedSubs++
+        
+        # Per-namespace network rule sets still need the session on this
+        # subscription (deduped no-op right after a fresh fetch).
+        if (@($inv.Items).Count -gt 0 -and -not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+            continue
+        }
+        
         try {
-            $namespaces = Invoke-AzureCommand -Command {
-                Get-AzEventHubNamespace -ErrorAction Stop
-            } -CommandName "Get-EventHubNamespaces"
-            $evaluatedSubs++
-            
-            foreach ($namespace in $namespaces) {
+            foreach ($namespace in $inv.Items) {
                 $networkRules = Invoke-AzureCommand -Command {
                     Get-AzEventHubNetworkRuleSet -ResourceGroupName $namespace.ResourceGroupName -Name $namespace.Name -ErrorAction SilentlyContinue
                 } -CommandName "Get-EventHubNetworkRules"
@@ -120,21 +126,27 @@ function Test-ServiceBusSecurity {
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
         
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
         Write-Progress -Activity "Checking Service Bus security" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
         
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind ServiceBusNamespaces
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'Fetch') {
+                Write-AuditLog -Message "Failed to check Service Bus security in subscription $($sub.Name): inventory fetch failed" -Level ERROR
+            }
+            continue
+        }
+        
+        # Per-namespace rule/auth calls still need the session on this
+        # subscription (deduped no-op right after a fresh fetch).
+        if (@($inv.Items).Count -gt 0 -and -not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+            continue
+        }
+        
         try {
-            $namespaces = Invoke-AzureCommand -Command {
-                Get-AzServiceBusNamespace -ErrorAction Stop
-            } -CommandName "Get-ServiceBusNamespaces"
-            
-            foreach ($ns in $namespaces) {
+            foreach ($ns in $inv.Items) {
                 $networkRuleSet = Invoke-AzureCommand -Command {
                     Get-AzServiceBusNetworkRuleSet -ResourceGroupName $ns.ResourceGroupName -Namespace $ns.Name -ErrorAction SilentlyContinue
                 } -CommandName "Get-ServiceBusNetworkRules"
@@ -221,21 +233,27 @@ function Test-APIMSecurity {
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
         
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
-        
         Write-Progress -Activity "Checking APIM security" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
         
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind ApiManagementServices
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'Fetch') {
+                Write-AuditLog -Message "Failed to check APIM security in subscription $($sub.Name): inventory fetch failed" -Level ERROR
+            }
+            continue
+        }
+        
+        # Per-service certificate calls still need the session on this
+        # subscription (deduped no-op right after a fresh fetch).
+        if (@($inv.Items).Count -gt 0 -and -not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+            continue
+        }
+        
         try {
-            $services = Invoke-AzureCommand -Command {
-                Get-AzApiManagement -ErrorAction Stop
-            } -CommandName "Get-ApiManagement"
-            
-            foreach ($apim in $services) {
+            foreach ($apim in $inv.Items) {
                 $external.Add([PSCustomObject]@{
                     SubscriptionId = $sub.Id
                     SubscriptionName = $sub.Name

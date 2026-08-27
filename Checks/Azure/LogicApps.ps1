@@ -25,21 +25,28 @@ function Test-LogicAppsManagedIdentity {
     
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
-        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
-            continue
-        }
         
         Write-Progress -Activity "Checking Logic Apps managed identity" `
                       -Status "Subscription: $($sub.Name)" `
                       -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
                       -Id $ProgressId
         
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind LogicApps
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'Fetch') {
+                Write-AuditLog -Message "Failed to check Logic Apps in subscription $($sub.Name): inventory fetch failed" -Level ERROR
+            }
+            continue
+        }
+        
+        # Per-app Get-AzResource calls still need the session on this
+        # subscription (deduped no-op right after a fresh fetch).
+        if (@($inv.Items).Count -gt 0 -and -not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+            continue
+        }
+        
         try {
-            $logicApps = Invoke-AzureCommand -Command {
-                Get-AzLogicApp -ErrorAction Stop
-            } -CommandName "Get-LogicApps"
-            
-            foreach ($logicApp in $logicApps) {
+            foreach ($logicApp in $inv.Items) {
                 if ($logicApp.State -ne "Enabled") { continue }
                 
                 try {
