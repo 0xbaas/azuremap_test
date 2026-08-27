@@ -10,7 +10,7 @@ BeforeAll {
     . "$projectRoot\Core\Config.ps1"
     . "$projectRoot\Core\Exclusions.ps1"
 
-    $script:State = Initialize-AuditState
+    $script:State = Initialize-AzureAuditState
 }
 
 Describe "Merge-Hashtable" {

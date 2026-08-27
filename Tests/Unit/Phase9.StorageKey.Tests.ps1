@@ -15,7 +15,7 @@ BeforeAll {
     . "$projectRoot\Checks\Azure\Storage.ps1"     # New-StorageCoverage helpers used by STORAGE-006
     . "$projectRoot\Checks\Azure\StorageKey.ps1"
 
-    $script:State = Initialize-AuditState
+    $script:State = Initialize-AzureAuditState
     $script:State.Config.Quiet = $true
     $script:Subs = @([PSCustomObject]@{ Id='s1'; Name='sub1' })
 
@@ -36,7 +36,7 @@ Describe "STORAGE-006 Storage key/SAS exposure" {
     BeforeEach {
         # Fresh state per test: re-initializing also resets the shared per-run
         # inventory cache, so each test's Get-AzStorageAccount mock is enumerated.
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $true
         $script:State.Results.Clear()
         # Tests emulate an Az.Storage version WITH -IncludeAccountSASPolicy support

@@ -55,7 +55,7 @@ BeforeAll {
 Describe "Performance phase" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $true
         $global:PerfCtxCalls     = 0
         $global:PerfKvFetchCalls = 0

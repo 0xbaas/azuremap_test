@@ -21,7 +21,7 @@ BeforeAll {
     . "$projectRoot\Core\Entra\Collection.ps1"
     . "$projectRoot\Checks\Azure\Identity.ps1"
 
-    $script:State = Initialize-AuditState
+    $script:State = Initialize-EntraAuditState
     $script:State.Config.Quiet         = $true
     $script:State.Config.SeverityLevel = "All"
 

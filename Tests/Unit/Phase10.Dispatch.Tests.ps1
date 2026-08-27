@@ -18,7 +18,8 @@ BeforeAll {
     . "$projectRoot\Core\Retry.ps1"
     . "$projectRoot\Core\Entra\Collection.ps1"
 
-    $script:State = Initialize-AuditState
+    $script:State = Initialize-AzureAuditState
+    $script:State = Initialize-EntraAuditState -State $script:State
     $script:State.Config.Quiet = $true
 
     # Fake per-subscription checks capturing what the engine forwarded.
@@ -118,7 +119,8 @@ Describe "Graph interactive/MFA auth error classification" {
     }
 
     It "does not retry an Authentication error (no 2s/4s loop) and never calls Connect-AzAccount" {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
+        $script:State = Initialize-EntraAuditState -State $script:State
         $script:State.Config.Quiet = $true
         Mock Connect-AzAccount { }
         $script:Attempts = 0

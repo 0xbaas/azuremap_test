@@ -12,7 +12,7 @@ BeforeAll {
     . "$projectRoot\Core\Azure\Rbac.ps1"
     . "$projectRoot\Checks\Azure\Governance.ps1"
 
-    $script:State = Initialize-AuditState
+    $script:State = Initialize-AzureAuditState
     $script:State.Config.Quiet = $true
     $script:Subs = @([PSCustomObject]@{ Id='s1'; Name='sub1' })
 

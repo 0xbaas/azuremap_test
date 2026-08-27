@@ -1,6 +1,11 @@
 #==============================================================================
 # AzureMap v2 - Core/Preflight.ps1
-# Authentication preflight for Azure Resource Manager (ARM) and Microsoft Graph.
+# Combined-mode authentication preflight for Azure Resource Manager (ARM) and
+# Microsoft Graph. The product entrypoints use the dedicated variants instead:
+# Core/Azure/Preflight.Azure.ps1 (Test-AzureAuthPreflight; ARM-required, never
+# probes Graph, also hosts Test-AzureSubscriptionScope) and
+# Core/Entra/Preflight.Entra.ps1 (Test-EntraAuthPreflight; Graph-required,
+# ARM context optional).
 #
 # Guarantees:
 #   * Never calls Connect-AzAccount automatically.
@@ -130,36 +135,4 @@ function Test-AuthenticationPreflight {
 
     $script:State.Auth = $result
     return $result
-}
-
-function Test-AzureSubscriptionScope {
-    <#
-    .SYNOPSIS
-        Decides whether the run has any usable Azure subscription scope.
-    .DESCRIPTION
-        When neither Get-AzSubscription nor the current Az context produced a
-        usable subscription (and the run is not Entra-only), there is nothing
-        to audit: continuing would emit an empty, misleading report. Returns
-        Usable=$false with an actionable Message so the caller stops before
-        collection and check execution instead of producing partial output.
-    .OUTPUTS
-        [pscustomobject] @{ Usable = [bool]; Message = [string] }
-    #>
-    [CmdletBinding()]
-    param(
-        [AllowNull()]
-        [AllowEmptyCollection()]
-        [object[]]$Subscriptions,
-
-        [switch]$EntraOnly
-    )
-
-    if (@($Subscriptions).Count -gt 0 -or $EntraOnly) {
-        return [PSCustomObject]@{ Usable = $true; Message = '' }
-    }
-
-    return [PSCustomObject]@{
-        Usable  = $false
-        Message = 'No usable Azure subscriptions found. Run Connect-AzAccount and select a valid tenant/subscription (or grant the identity subscription read), then re-run.'
-    }
 }

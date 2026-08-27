@@ -2,23 +2,37 @@
 # AzureMap v2 - Core/State.ps1
 # Central audit state initialization and module requirement definitions.
 # All modules reference $script:State as the single source of truth.
+#
+# Initialize-AuditState is the SHARED base (metadata, timing, results,
+# executed checks, circuit breaker, log buffer, check registry, exclusions,
+# common config). Product slots are layered on top by:
+#   Initialize-AzureAuditState - subscriptions/footprint/RBAC + inventory
+#                                caches/capability model + full Az module tables
+#   Initialize-EntraAuditState - Entra/tenant-wide/Graph token slots +
+#                                Az.Accounts-only module table
+# Both wrappers accept an optional -State to layer onto (combined loads).
 #==============================================================================
 
 function Initialize-AuditState {
     <#
     .SYNOPSIS
-        Creates and returns the central $script:State hashtable for AzureMap.
+        Creates and returns the shared base $script:State hashtable.
     .DESCRIPTION
-        Initializes every sub-structure that other Core modules depend on:
-        Config, Metadata, Cache, EntraData, TenantWideData, Results,
+        Initializes every sub-structure that shared Core modules depend on:
+        Config, Metadata (incl. ProductName), Cache shell, Results,
         FailedSubscriptions, ExecutedChecks, CircuitBreaker, LogBuffer,
-        GraphToken/GraphTokenExpiry, Timestamp, LogFile, CheckRegistry,
-        and module requirement definitions.
+        Timestamp, LogFile, CheckRegistry, and Exclusions. Product-specific
+        slots are added by Initialize-AzureAuditState / Initialize-EntraAuditState.
+    .PARAMETER ProductName
+        Product label ('AzureMap' or 'EntraMap'); drives banner/CLI/report labels.
     .OUTPUTS
         [hashtable] The initialized state object (also stored in $script:State).
     #>
     [CmdletBinding()]
-    param()
+    param(
+        [ValidateSet('AzureMap', 'EntraMap')]
+        [string]$ProductName = 'AzureMap'
+    )
 
     $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 
@@ -26,14 +40,15 @@ function Initialize-AuditState {
 
         # --- Metadata ---
         Metadata = @{
-            ToolName = "AzureMap"
-            Version  = "2.0"
-            Author   = "@baas"
+            ToolName    = $ProductName
+            ProductName = $ProductName
+            Version     = "2.0"
+            Author      = "@baas"
         }
 
         Timestamp = $timestamp
         StartTime = Get-Date
-        LogFile   = "AzureMap-$timestamp.log"
+        LogFile   = "$ProductName-$timestamp.log"
         # Console dedupe for identical WARN/ERROR lines (key -> occurrence count).
         # Every occurrence still lands in the log file; the console prints the
         # first occurrence plus one suppression note.
@@ -53,16 +68,6 @@ function Initialize-AuditState {
             SubscriptionFetchSeconds = @{}
         }
 
-        # Footprint: normalized subscription list for error-message normalization.
-        Subscriptions = @()
-        # Environment footprint (Core/Azure/Footprint.ps1): subscriptions/RGs/resources/
-        # resource-type counts. $null until the pre-scan runs; drives applicability.
-        Footprint = $null
-        # Phase B2 capability model (Core/Capability.ps1 +
-        # Core/Azure/CapabilityModel.Azure.ps1): nodes/edges/
-        # insights built AFTER assessment from already-collected data only.
-        # $null until Build-CapabilityModel runs; consumed by JSON/HTML/CLI.
-        CapabilityModel = $null
         # Applicability/error plumbing for the per-check CLI summary:
         # CurrentCheckId is set while a check executes; CheckErrors aggregates
         # normalized WARN/ERROR messages per check (message -> count) so the CLI
@@ -126,50 +131,20 @@ function Initialize-AuditState {
             }
         }
 
-        # --- Three-tier cache ---
+        # --- Shared cache shell (product caches are layered by the wrappers) ---
         Cache = @{
             Subscriptions   = $null
-            RBACAssignments = @{}
-            # Per-subscription custom role definitions as fetched by IDENTITY-005
-            # (Get-AzRoleDefinition -Custom), retained for read-only capability
-            # modeling (Phase B2): key "<subscriptionId>" -> slim projections
-            # @{ RoleGuid; RoleName; Actions; DataActions }. In-memory only.
-            RoleDefinitions = @{}
-            # Per-run inventory cache (Core/Azure/InventoryCache.ps1): key
-            # "<subscriptionId>|<Kind>" -> @{ Items; ProvenEmpty; Unavailable }.
-            # In-memory only, cleared at end of run; never written to disk.
-            ResourceLists   = @{}
-            # Per-subscription flag: $true when an RBAC read could not be evaluated
-            # (e.g. ARM RBAC unreadable). Lets RBAC checks emit NotEvaluated instead
-            # of a misleading PASS when collection failed.
-            RBACUnavailable = @{}
             Graph           = @{}
             AzBatch         = @{}
             General         = @{}
         }
 
-        # --- Entra ID / tenant-wide data ---
-        EntraData = @{
-            Users             = $null
-            Groups            = $null
-            DirectoryRoles    = $null
-            ConditionalAccess = $null
-        }
-
-        TenantWideData = @{
-            Applications      = $null
-            ServicePrincipals = $null
-            TenantId          = $null
-            FetchedAt         = $null
-        }
-
-        # --- Authentication preflight result (populated by Test-AuthenticationPreflight) ---
+        # --- Authentication preflight result (populated by the product preflight) ---
         Auth = $null
 
         # --- Runtime slots (initialized so Windows PowerShell 5.1 StrictMode does not
         #     throw "property cannot be found" on first access before they are set) ---
         CurrentCheck = $null
-        Entra        = $null
 
         # --- Results tracking ---
         Results             = [System.Collections.Generic.List[object]]::new()
@@ -192,10 +167,6 @@ function Initialize-AuditState {
         LastLogFlush  = Get-Date
         LogLock       = [System.Object]::new()
 
-        # --- Graph API tokens ---
-        GraphToken       = $null
-        GraphTokenExpiry = $null
-
         # --- Check registry ---
         CheckRegistry = [System.Collections.Generic.List[object]]::new()
 
@@ -217,9 +188,58 @@ function Initialize-AuditState {
         WarningMark = [char]0x26A0  # warning triangle
     }
 
+    return $script:State
+}
+
+function Initialize-AzureAuditState {
+    <#
+    .SYNOPSIS
+        Layers the AzureMap (ARM/subscription) slots onto the shared base state.
+    .DESCRIPTION
+        Adds the subscription/footprint slots, the RBAC/inventory/role-definition
+        caches, the capability-model slot and the full Az module-requirement
+        tables. With no -State, a fresh shared base is created first
+        (ProductName 'AzureMap').
+    .PARAMETER State
+        Optional existing state hashtable to layer onto (combined loads).
+    .OUTPUTS
+        [hashtable] The state object.
+    #>
+    [CmdletBinding()]
+    param([hashtable]$State)
+
+    if (-not $State) { $State = Initialize-AuditState -ProductName 'AzureMap' }
+
+    # Footprint: normalized subscription list for error-message normalization.
+    $State.Subscriptions = @()
+    # Environment footprint (Core/Azure/Footprint.ps1): subscriptions/RGs/resources/
+    # resource-type counts. $null until the pre-scan runs; drives applicability.
+    $State.Footprint = $null
+    # Phase B2 capability model (Core/Capability.ps1 +
+    # Core/Azure/CapabilityModel.Azure.ps1): nodes/edges/
+    # insights built AFTER assessment from already-collected data only.
+    # $null until Build-CapabilityModel runs; consumed by JSON/HTML/CLI.
+    $State.CapabilityModel = $null
+
+    # Per-subscription RBAC assignment cache (Core/Azure/Rbac.ps1).
+    $State.Cache.RBACAssignments = @{}
+    # Per-subscription custom role definitions as fetched by IDENTITY-005
+    # (Get-AzRoleDefinition -Custom), retained for read-only capability
+    # modeling (Phase B2): key "<subscriptionId>" -> slim projections
+    # @{ RoleGuid; RoleName; Actions; DataActions }. In-memory only.
+    $State.Cache.RoleDefinitions = @{}
+    # Per-run inventory cache (Core/Azure/InventoryCache.ps1): key
+    # "<subscriptionId>|<Kind>" -> @{ Items; ProvenEmpty; Unavailable }.
+    # In-memory only, cleared at end of run; never written to disk.
+    $State.Cache.ResourceLists   = @{}
+    # Per-subscription flag: $true when an RBAC read could not be evaluated
+    # (e.g. ARM RBAC unreadable). Lets RBAC checks emit NotEvaluated instead
+    # of a misleading PASS when collection failed.
+    $State.Cache.RBACUnavailable = @{}
+
     # ---- Module requirement definitions (static, referenced by Config/CheckRegistry) ----
 
-    $script:State.RequiredModules = @{
+    $State.RequiredModules = @{
         "Az.Accounts"  = "2.0.0"
         "Az.Resources" = "6.0.0"
         "Az.Storage"   = "5.0.0"
@@ -230,7 +250,7 @@ function Initialize-AuditState {
         "Az.Monitor"   = "4.0.0"
     }
 
-    $script:State.OptionalModules = @{
+    $State.OptionalModules = @{
         "Az.Aks"               = "5.0.0"
         "Az.ResourceGraph"     = "2.0.0"
         "Az.CosmosDB"          = "1.0.0"
@@ -244,7 +264,7 @@ function Initialize-AuditState {
         "Az.LogicApp"          = "1.0.0"
     }
 
-    $script:State.ServiceModules = @{
+    $State.ServiceModules = @{
         "Storage"           = @("Az.Storage")
         "SQL"               = @("Az.Sql")
         "AKS"               = @("Az.Aks")
@@ -267,5 +287,63 @@ function Initialize-AuditState {
         "LogicApp"          = @("Az.LogicApp")
     }
 
-    return $script:State
+    return $State
+}
+
+function Initialize-EntraAuditState {
+    <#
+    .SYNOPSIS
+        Layers the EntraMap (Graph/tenant) slots onto the shared base state.
+    .DESCRIPTION
+        Adds the Entra collection slot, the tenant-wide data structure and the
+        Graph token slots, plus the Az.Accounts-only module-requirement table
+        (EntraMap needs an Az context as the token vehicle but performs no
+        subscription scanning). Empty RBAC caches are also ensured so the
+        IDENTITY-002 RBAC-correlation degradation path (Cache.RBACUnavailable)
+        works without any Azure state. With no -State, a fresh shared base is
+        created first (ProductName 'EntraMap').
+    .PARAMETER State
+        Optional existing state hashtable to layer onto (combined loads).
+    .OUTPUTS
+        [hashtable] The state object.
+    #>
+    [CmdletBinding()]
+    param([hashtable]$State)
+
+    $fresh = (-not $State)
+    if ($fresh) { $State = Initialize-AuditState -ProductName 'EntraMap' }
+
+    # --- Entra ID / tenant-wide data ---
+    $State.Entra = $null
+
+    $State.TenantWideData = @{
+        Applications      = $null
+        ServicePrincipals = $null
+        TenantId          = $null
+        FetchedAt         = $null
+    }
+
+    # --- Graph API tokens ---
+    $State.GraphToken       = $null
+    $State.GraphTokenExpiry = $null
+
+    # Empty RBAC caches: the tenant-side identity checks degrade their ARM RBAC
+    # correlation via Cache.RBACUnavailable; the machinery must exist even when
+    # no Azure subscription scope is present.
+    if (-not $State.Cache.ContainsKey('RBACAssignments')) { $State.Cache.RBACAssignments = @{} }
+    if (-not $State.Cache.ContainsKey('RBACUnavailable')) { $State.Cache.RBACUnavailable = @{} }
+
+    # ---- Module requirement definitions: EntraMap needs Az.Accounts only ----
+    # (Get-GraphToken rides on Get-AzAccessToken; no subscription scanning).
+    # Only set on a fresh product state - when layering onto an existing
+    # (combined) state, the Azure tables already present are kept.
+    if ($fresh) {
+        $State.RequiredModules = @{
+            "Az.Accounts" = "2.0.0"
+        }
+        $State.OptionalModules = @{}
+        $State.ServiceModules  = @{}
+    }
+
+    return $State
 }

@@ -25,7 +25,8 @@ BeforeAll {
     . "$projectRoot\Core\Azure\Rbac.ps1"
     . "$projectRoot\Core\Console.ps1"
 
-    $script:State = Initialize-AuditState
+    $script:State = Initialize-AzureAuditState
+    $script:State = Initialize-EntraAuditState -State $script:State
     $script:State.Config.Quiet = $true
 }
 
@@ -57,7 +58,8 @@ Describe "Get-SafeProgressPercent" {
 
 Describe "Check error records capture a script stack trace" {
     It "records Status=Error and a non-empty StackTrace when a check throws" {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
+        $script:State = Initialize-EntraAuditState -State $script:State
         $script:State.Config.Quiet = $true
 
         function global:Test-ThrowsCheck {
@@ -78,7 +80,8 @@ Describe "Check error records capture a script stack trace" {
 
 Describe "RBAC helper avoids Microsoft Graph and flags NotEvaluated" {
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
+        $script:State = Initialize-EntraAuditState -State $script:State
         $script:State.Config.Quiet = $true
         $script:GraphWasCalled = $false
         function global:Get-GraphToken { param([switch]$ForceRefresh) $script:GraphWasCalled = $true; 'stub-token' }
@@ -105,7 +108,8 @@ Describe "RBAC helper avoids Microsoft Graph and flags NotEvaluated" {
 
 Describe "PASS findings are recorded for export but quiet on the console" {
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
+        $script:State = Initialize-EntraAuditState -State $script:State
         $script:State.Config.Quiet         = $false
         $script:State.Config.VerboseOutput = $true
         $script:State.Config.DebugOutput   = $false
@@ -124,7 +128,8 @@ Describe "PASS findings are recorded for export but quiet on the console" {
 
 Describe "Top Findings dedup renders without error" {
     It "groups duplicate identical findings and renders without throwing" {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
+        $script:State = Initialize-EntraAuditState -State $script:State
         $script:State.Config.Quiet = $false
         1..3 | ForEach-Object {
             Write-Finding -Severity 'HIGH' -Message 'duplicate finding across subs' -Count 2 -Data @(1,2) -Service 'Network' -SubscriptionId 'Multiple'

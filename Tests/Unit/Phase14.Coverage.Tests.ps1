@@ -174,7 +174,7 @@ Describe "Get-CheckCoverage aggregation" {
 Describe "Invoke-AuditChecks - B1 execution records" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $true
         $script:FxSub = [PSCustomObject]@{ Id = 'S1'; Name = 'n1'; TenantId = 'T1' }
     }
@@ -257,7 +257,7 @@ Describe "Invoke-AuditChecks - B1 execution records" {
 Describe "Write-Finding - finding-block console dedupe" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $false
         # Finding blocks are strictly opt-in (Phase B3 hardening): -ShowFindings
         # enables them; the dedupe contract is exercised under that flag.
@@ -286,7 +286,7 @@ Describe "Write-Finding - finding-block console dedupe" {
 
 Describe "Get-RunDiagnostics - Partial tally" {
     It "counts Partial execution records" {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.ExecutedChecks.Add([PSCustomObject]@{ CheckId='P-1'; Status='Partial' })
         $script:State.ExecutedChecks.Add([PSCustomObject]@{ CheckId='P-2'; Status='Pass' })
         $d = Get-RunDiagnostics
@@ -298,7 +298,7 @@ Describe "Get-RunDiagnostics - Partial tally" {
 Describe "Exports preserve explicit status and coverage" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $true
 
         Write-Finding -Severity 'HIGH' -Status 'PARTIAL' -Message 'partial storage run' -Count 0 -Service 'Storage' -CheckId 'B1-EXP' `
@@ -400,7 +400,7 @@ Describe "Exports preserve explicit status and coverage" {
 
 Describe "Show-AuditSummary - default export path includes HTML" {
     It "default ExportFormats emit CSV + JSON + HTML and the HTML file is created" {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $true
         $script:State.Timestamp = '20990101-000000'
         # product default: HTML ships alongside CSV/JSON unless explicitly disabled

@@ -14,7 +14,7 @@ BeforeAll {
     . "$projectRoot\Core\Azure\InventoryCache.ps1"
     . "$projectRoot\Checks\Azure\Exposure.ps1"
 
-    $script:State = Initialize-AuditState
+    $script:State = Initialize-AzureAuditState
     $script:State.Config.Quiet = $true
     $script:Subs = @([PSCustomObject]@{ Id='s1'; Name='sub1' })
 

@@ -15,7 +15,7 @@ BeforeAll {
     . "$projectRoot\Core\Retry.ps1"
     . "$projectRoot\Core\Entra\Graph.ps1"
 
-    $script:State = Initialize-AuditState
+    $script:State = Initialize-EntraAuditState
     $script:State.Config.Quiet = $true
 
     $script:FakeTokenPlain = 'test-token'

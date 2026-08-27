@@ -85,7 +85,8 @@ BeforeAll {
 Describe "Phase15 - B1 smoke cleanup" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
+        $script:State = Initialize-EntraAuditState -State $script:State
         $script:State.Config.Quiet = $true
         $script:StorageSasPolicySupported = $true
         $global:FxWebApps = @(); $global:FxWebAppsThrow = $false

@@ -43,7 +43,7 @@ BeforeAll {
 Describe "Get-EnvironmentFootprint" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $true
     }
 
@@ -106,7 +106,7 @@ Describe "Get-EnvironmentFootprint" {
 Describe "Get-CheckApplicability" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $true
     }
 
@@ -140,7 +140,7 @@ Describe "Get-CheckApplicability" {
 Describe "Invoke-AuditChecks - applicability gate" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $true
         $script:FxSub = [PSCustomObject]@{ Id = 'S1'; Name = 'n1'; TenantId = 'T1' }
     }
@@ -196,7 +196,7 @@ Describe "Invoke-AuditChecks - applicability gate" {
 Describe "NOTAPPLICABLE status model" {
 
     It "Resolve-CheckStatus maps an explicit NOTAPPLICABLE record to NotApplicable" {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $f = Write-Finding -Severity 'INFO' -Status 'NOTAPPLICABLE' -Message 'no widgets in scope' -Count 0 -Service 'APIM' -CheckId 'UX-NA'
         # Write-Finding returns nothing; read from Results
         $rec = @($script:State.Results | Where-Object { $_.CheckId -eq 'UX-NA' })
@@ -204,7 +204,7 @@ Describe "NOTAPPLICABLE status model" {
     }
 
     It "IsInventoryOnly records never fail a check (and never show plain PASS)" {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         Write-Finding -Severity 'INFO' -Status 'PASS' -Message 'public ip inventory' -Count 7 -Service 'PublicIP' -CheckId 'UX-INV' -IsInventoryOnly $true
         $rec = @($script:State.Results | Where-Object { $_.CheckId -eq 'UX-INV' })
         # Phase 18: inventory-only output resolves to the INVENTORY display state,
@@ -213,7 +213,7 @@ Describe "NOTAPPLICABLE status model" {
     }
 
     It "Get-RunDiagnostics tallies NotApplicable" {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.ExecutedChecks.Add([PSCustomObject]@{ CheckId = 'N-1'; Status = 'NotApplicable' })
         $script:State.ExecutedChecks.Add([PSCustomObject]@{ CheckId = 'N-2'; Status = 'Pass' })
         $d = Get-RunDiagnostics
@@ -222,7 +222,7 @@ Describe "NOTAPPLICABLE status model" {
     }
 
     It "HTML renders explicit NotApplicable as N/A and JSON tallies it" {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $true
         $check = [PSCustomObject]@{ CheckId = 'UX-NA2'; Name = 'apim'; Category = 'Azure'; Service = 'APIM'; Phase = 'PerSubscription' }
         $rec = New-CheckExecutionRecord -Check $check
@@ -247,7 +247,7 @@ Describe "NOTAPPLICABLE status model" {
 Describe "Banner and NoColor" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
     }
 
     It "banner shows branding and version" {
@@ -289,7 +289,7 @@ Describe "Banner and NoColor" {
 Describe "Run summary shows footprint and applicability" {
 
     It "HTML includes the Environment Footprint section when footprint exists" {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $true
         $script:State.Footprint = script:New-Footprint -TypeCounts @{ 'microsoft.storage/storageaccounts' = 60 }
         $out = Join-Path $TestDrive 'fp.html'
@@ -301,7 +301,7 @@ Describe "Run summary shows footprint and applicability" {
     }
 
     It "Show-AuditConsole prints duration, scope, status totals and coverage lines" {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $false
         $script:State.Footprint = script:New-Footprint -TypeCounts @{ 'microsoft.storage/storageaccounts' = 60 }
         $script:State.ExecutedChecks.Add([PSCustomObject]@{ CheckId = 'S-1'; Name = 'x'; Status = 'Pass' })

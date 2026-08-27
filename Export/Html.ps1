@@ -347,7 +347,7 @@ function Export-ResultsHtml {
         $ctx  = Get-AzContext -ErrorAction SilentlyContinue
         $account = Escape-HtmlContent -Text $(if ($ctx -and $ctx.Account) { $ctx.Account.Id } else { 'Unknown' })
         $tenant  = Escape-HtmlContent -Text $(if ($ctx -and $ctx.Tenant)  { $ctx.Tenant.Id }  else { 'Unknown' })
-        $mode    = if ($script:State.Config.SkipEntra) { 'Azure-only (-SkipEntra)' } else { 'Full (Azure + Entra)' }
+        $mode    = Get-RunModeLabel
         $dpMode  = if ($script:State.Config.IncludeDataPlane) { 'enabled (-IncludeDataPlane)' } else { 'disabled (default; -IncludeDataPlane to enable)' }
 
         # Real finding groups = rows representing affected resources. Coverage
@@ -471,7 +471,7 @@ footer .brand { color:var(--brand); font-weight:600; }
 
         # ---- Header + nav ----
         [void]$sb.Append("<header class=""topbar""><h1>$(Escape-HtmlContent -Text $script:State.Metadata.ToolName) <span class=""ver"">v$($script:State.Metadata.Version)</span></h1>")
-        [void]$sb.Append('<div class="tagline">Azure / Entra Security Assessment &middot; <span class="brand">Created by BAAS &middot; 0xbaas.com</span></div>')
+        [void]$sb.Append("<div class=""tagline"">$(Escape-HtmlContent -Text (Get-ProductTagline)) &middot; <span class=""brand"">Created by BAAS &middot; 0xbaas.com</span></div>")
         [void]$sb.Append("<div class=""meta""><span>Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')</span><span>Account: $account</span><span>Tenant: $tenant</span><span>Mode: $mode</span><span>Data-plane checks: $dpMode</span></div></header>")
         [void]$sb.Append('<nav><a href="#exec">Executive Summary</a><a href="#coverage">Coverage</a><a href="#findings">Findings</a><a href="#components">Affected Components</a><a href="#capability">Capability Insights</a><a href="#checks">Per-Check Detail</a><a href="#attention">Not Evaluated / Errors</a></nav>')
         [void]$sb.Append('<main>')

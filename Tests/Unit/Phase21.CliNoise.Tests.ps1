@@ -41,7 +41,7 @@ BeforeAll {
 Describe "Write-Finding - normal CLI carries no remediation commands or raw finding blocks" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $false
         $script:State.LogFile = Join-Path $TestDrive 'AzureMap-test.log'
         $script:captured = New-Object System.Collections.Generic.List[string]
@@ -77,7 +77,7 @@ Describe "Write-Finding - normal CLI carries no remediation commands or raw find
         $all | Should -Match 'Finding: block only'
         $all | Should -Not -Match 'Set-AzStorageAccount'
 
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $false
         $script:State.Config.ShowRemediation = $true
         $script:State.LogFile = Join-Path $TestDrive 'AzureMap-test.log'
@@ -92,7 +92,7 @@ Describe "Write-Finding - normal CLI carries no remediation commands or raw find
 Describe "Invoke-AuditChecks - only relevant checks print during Running assessment" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $false
         $script:State.LogFile = Join-Path $TestDrive 'AzureMap-test.log'
         # High-confidence complete footprint containing only storage accounts,
@@ -152,7 +152,7 @@ Describe "Invoke-AuditChecks - only relevant checks print during Running assessm
 Describe "Could not check rows carry a useful reason" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $false
         $script:State.LogFile = Join-Path $TestDrive 'AzureMap-test.log'
         $script:ui = New-Object System.Collections.Generic.List[string]
@@ -177,7 +177,7 @@ Describe "Could not check rows carry a useful reason" {
 Describe "Inventory vs Clean" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $false
         $script:State.LogFile = Join-Path $TestDrive 'AzureMap-test.log'
         $script:ui = New-Object System.Collections.Generic.List[string]
@@ -221,7 +221,7 @@ Describe "Inventory vs Clean" {
 Describe "Fail with incomplete sub-collections is explicit on the row" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $false
         $script:State.LogFile = Join-Path $TestDrive 'AzureMap-test.log'
     }
@@ -245,7 +245,7 @@ Describe "Fail with incomplete sub-collections is explicit on the row" {
 Describe "Long display names never collide with the status label" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $false
         $script:State.Config.NoColor = $true
         $script:captured = New-Object System.Collections.Generic.List[string]
@@ -306,7 +306,7 @@ Describe "CVSS-like severity colors are fixed" {
 Describe "Show-AuditConsole - final Check results section is opt-in" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet  = $false
         $script:State.Config.NoColor = $true
         $script:ui = New-Object System.Collections.Generic.List[string]
@@ -341,7 +341,7 @@ Describe "Show-AuditConsole - final Check results section is opt-in" {
 Describe "Exports preserve detailed evidence and internal statuses" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $true
         $script:State.LogFile = Join-Path $TestDrive 'AzureMap-test.log'
     }

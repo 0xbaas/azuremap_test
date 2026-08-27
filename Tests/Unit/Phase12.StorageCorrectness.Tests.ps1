@@ -81,7 +81,7 @@ BeforeAll {
 Describe "Storage correctness fixtures" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $true
         # Tests emulate an Az.Storage version WITH -IncludeAccountSASPolicy support
         # (unsupported-version behavior is covered in Phase15).

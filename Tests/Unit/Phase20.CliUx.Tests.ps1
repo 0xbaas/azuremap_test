@@ -101,7 +101,7 @@ Describe "Get-CheckDisplayName / Get-CheckDomain" {
 Describe "Write-CheckStatusLine - human output" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet  = $false
         $script:State.Config.NoColor = $true
         $script:UiForceAnsi = $null
@@ -162,7 +162,7 @@ Describe "Write-CheckStatusLine - human output" {
 Describe "Invoke-AuditChecks - mode skip, domain order, error summarization" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $true
         $script:State.LogFile = Join-Path $TestDrive 'AzureMap-test.log'
     }
@@ -213,7 +213,7 @@ Describe "Invoke-AuditChecks - mode skip, domain order, error summarization" {
 Describe "Show-EnvironmentFootprint - product wording" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $false
         Mock Write-UiHost {}
     }
@@ -259,7 +259,7 @@ Describe "Show-EnvironmentFootprint - product wording" {
 Describe "Show-AssessmentPlan" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $false
         Mock Write-UiHost {}
     }

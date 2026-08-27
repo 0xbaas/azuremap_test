@@ -10,7 +10,7 @@ BeforeAll {
     . "$projectRoot\Core\CheckRegistry.ps1"
     . "$projectRoot\Checks\Entra\ConditionalAccess.ps1"
 
-    $script:State = Initialize-AuditState
+    $script:State = Initialize-EntraAuditState
     $script:State.Config.Quiet = $true
 
     function Invoke-GraphCommand { param([string]$Uri, [switch]$AllPages, [string]$CommandName, [string]$Method='GET', [hashtable]$Body, [string]$ApiVersion='v1.0', [switch]$AllowNonGet) }

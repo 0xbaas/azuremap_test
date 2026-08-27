@@ -16,7 +16,7 @@ BeforeAll {
     . "$projectRoot\Core\Retry.ps1"
     . "$projectRoot\Core\RunStatus.ps1"
     . "$projectRoot\Core\Azure\Footprint.ps1"
-    . "$projectRoot\Core\Preflight.ps1"
+    . "$projectRoot\Core\Azure\Preflight.Azure.ps1"
     . "$projectRoot\Core\CheckRegistry.ps1"
     . "$projectRoot\Core\Console.ps1"
 
@@ -42,7 +42,7 @@ BeforeAll {
 Describe "Get-EnvironmentFootprint ARG scoping" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $true
         $script:ArgSubscriptionParam = $null
         $script:CtxHistory = @()
@@ -150,7 +150,7 @@ Describe "Get-EnvironmentFootprint ARG scoping" {
 Describe "Get-CheckApplicability confidence gating" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $true
         $check = [PSCustomObject]@{ CheckId = 'STORAGE-001'; Name = 'x'; RequiredResourceTypes = @('microsoft.storage/storageaccounts'); AlwaysRun = $false }
         $script:StorageCheck = $check
@@ -230,7 +230,7 @@ Describe "Inventory-only checks never display plain PASS" {
     }
 
     It "status line shows INVENTORY, not PASS" {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $false
         $script:State.Config.NoColor = $true
         $script:captured = New-Object System.Collections.Generic.List[string]
@@ -244,7 +244,7 @@ Describe "Inventory-only checks never display plain PASS" {
     }
 
     It "run diagnostics counts Inventory separately from Passed" {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.ExecutedChecks.Add([PSCustomObject]@{ CheckId = 'E-1'; Name = 'x'; Status = 'Inventory' })
         $script:State.ExecutedChecks.Add([PSCustomObject]@{ CheckId = 'P-1'; Name = 'y'; Status = 'Pass' })
         $diag = Get-RunDiagnostics
@@ -256,7 +256,7 @@ Describe "Inventory-only checks never display plain PASS" {
 Describe "Legacy section banners are hidden in normal output" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $false
     }
 

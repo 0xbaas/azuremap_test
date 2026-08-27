@@ -10,7 +10,7 @@ BeforeAll {
     . "$projectRoot\Core\CheckRegistry.ps1"
     . "$projectRoot\Checks\Entra\BreakGlass.ps1"
 
-    $script:State = Initialize-AuditState
+    $script:State = Initialize-EntraAuditState
     $script:State.Config.Quiet = $true
 
     $script:GAID = '62e90394-69f5-4237-9190-012177145e10'

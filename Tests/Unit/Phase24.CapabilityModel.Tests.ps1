@@ -101,7 +101,7 @@ BeforeAll {
 Describe "Phase B2 capability model" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $true
         $script:State.Config.NoColor = $true
     }

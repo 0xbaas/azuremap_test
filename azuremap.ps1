@@ -153,8 +153,10 @@ foreach ($exportFile in Get-ChildItem -Path "$scriptRoot\Export\*.ps1" -File) {
 #region ---- Main execution ----
 
 try {
-    # 1. Initialize state
-    $script:State = Initialize-AuditState
+    # 1. Initialize state (combined load: Azure product state with the Entra
+    #    slots layered on top - azuremap.ps1 still registers Entra checks here)
+    $script:State = Initialize-AzureAuditState
+    $script:State = Initialize-EntraAuditState -State $script:State
     $script:State.Config.SeverityLevel = $SeverityLevel
     $script:State.Config.Services      = $Services
     $script:State.Config.Quiet         = $Quiet.IsPresent

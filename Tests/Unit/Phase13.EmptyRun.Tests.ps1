@@ -24,7 +24,7 @@ BeforeAll {
 Describe "Empty run does not crash export/summary" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $true
     }
 

@@ -69,7 +69,7 @@ BeforeAll {
 Describe "STORAGE-005 unique accounts vs risk signals" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $true
         $script:StorageSasPolicySupported = $true
         $global:FxNet = $null
@@ -136,7 +136,7 @@ Describe "Findings aggregation (Group-HtmlFindings)" {
 Describe "HTML report structure" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $true
     }
 
@@ -192,7 +192,7 @@ Describe "HTML report structure" {
 Describe "Redaction (-RedactSensitive)" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $true
     }
 

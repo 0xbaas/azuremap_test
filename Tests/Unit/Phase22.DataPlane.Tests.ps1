@@ -45,7 +45,7 @@ Describe "Phase B3 switch surface" {
     }
 
     It "IncludeDataPlane defaults to false (safely read-only)" {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.IncludeDataPlane | Should -BeFalse
     }
 
@@ -61,7 +61,7 @@ Describe "Phase B3 switch surface" {
 Describe "Invoke-AuditChecks - data-plane gate" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $false
         $script:State.LogFile = Join-Path $TestDrive 'AzureMap-test.log'
         # High-confidence complete footprint with storage accounts present, so
@@ -142,7 +142,7 @@ Describe "Invoke-AuditChecks - data-plane gate" {
 Describe "CLI scope and assessment plan show the data-plane mode" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $false
         $script:State.LogFile = Join-Path $TestDrive 'AzureMap-test.log'
         $script:State.Footprint = [PSCustomObject]@{
@@ -192,7 +192,7 @@ Describe "CLI scope and assessment plan show the data-plane mode" {
 Describe "Exports show the data-plane mode" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $true
         $script:State.LogFile = Join-Path $TestDrive 'AzureMap-test.log'
     }
@@ -308,7 +308,7 @@ Describe "Safety grep - no key/secret/content retrieval in runtime code" {
 Describe "Permission-denied data-plane degradation" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $false
         $script:State.Config.IncludeDataPlane = $true
         $script:State.LogFile = Join-Path $TestDrive 'AzureMap-test.log'

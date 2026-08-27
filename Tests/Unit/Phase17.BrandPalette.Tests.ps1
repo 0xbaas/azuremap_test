@@ -33,7 +33,7 @@ BeforeAll {
 Describe "HTML uses the official BAAS palette" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $true
         $script:htmlPath = Join-Path $TestDrive 'palette.html'
         Export-ResultsHtml -Results @() -OutputPath $script:htmlPath | Out-Null
@@ -66,7 +66,7 @@ Describe "HTML uses the official BAAS palette" {
 Describe "Write-UiHost BAAS truecolor mapping" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.NoColor = $false
         if ($env:NO_COLOR) { $env:NO_COLOR = $null }
         $script:UiForceAnsi = $null
@@ -136,7 +136,7 @@ Describe "Write-UiHost BAAS truecolor mapping" {
 Describe "Write-CheckStatusLine alignment with BAAS colors" {
 
     BeforeEach {
-        $script:State = Initialize-AuditState
+        $script:State = Initialize-AzureAuditState
         $script:State.Config.Quiet = $false
         $script:State.Config.NoColor = $true
         $script:UiForceAnsi = $null

@@ -124,6 +124,41 @@ function Format-UiDuration {
     return '{0:n1}s' -f $s
 }
 
+function Get-ProductTagline {
+    <#
+    .SYNOPSIS
+        Product-aware assessment tagline for the startup banner and the HTML
+        report header, driven by $script:State.Metadata.ProductName.
+    #>
+    [CmdletBinding()]
+    param()
+    if ($script:State -and $script:State.Metadata -and
+        "$($script:State.Metadata.ProductName)" -eq 'EntraMap') {
+        return 'Entra ID Security Assessment'
+    }
+    return 'Azure Security Assessment'
+}
+
+function Get-RunModeLabel {
+    <#
+    .SYNOPSIS
+        Product-aware run-mode label for the CLI run context and the HTML
+        report header. EntraMap is always 'Entra-only (EntraMap)'. AzureMap is
+        'Azure-only' when no Graph/Entra modules are loaded (product split) or
+        when -SkipEntra was given; 'Full (Azure + Entra)' only while a combined
+        load still carries the Entra modules.
+    #>
+    [CmdletBinding()]
+    param()
+    if ($script:State -and $script:State.Metadata -and
+        "$($script:State.Metadata.ProductName)" -eq 'EntraMap') {
+        return 'Entra-only (EntraMap)'
+    }
+    if ($script:State.Config.SkipEntra) { return 'Azure-only (-SkipEntra)' }
+    if (Get-Command -Name 'Get-GraphToken' -ErrorAction SilentlyContinue) { return 'Full (Azure + Entra)' }
+    return 'Azure-only'
+}
+
 function Get-PerformanceSummary {
     <#
     .SYNOPSIS
@@ -363,7 +398,7 @@ function Show-Banner {
 
     Write-UiHost -Text ("+" + ('=' * ($w + 4)) + "+") -Color Cyan
     Write-UiHost -Text ("|" + (& $line $title) + "  |") -Color Cyan
-    Write-UiHost -Text ("|" + (& $line 'Azure / Entra Security Assessment') + "  |") -Color Cyan
+    Write-UiHost -Text ("|" + (& $line (Get-ProductTagline)) + "  |") -Color Cyan
     Write-UiHost -Text ("|" + (& $line 'Built by BAAS - 0xbaas.com') + "  |") -Color Cyan
     Write-UiHost -Text ("+" + ('=' * ($w + 4)) + "+") -Color Cyan
     Write-UiHost -Text ("  Started:  " + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Color Yellow
@@ -386,7 +421,7 @@ function Show-RunContext {
     $ten   = if ($ctx -and $ctx.Tenant)  { $ctx.Tenant.Id }  else { 'Unknown' }
     $acct  = Protect-SensitiveText -Text $acct
     $ten   = Protect-SensitiveText -Text $ten
-    $mode  = if ($script:State.Config.SkipEntra) { 'Azure-only (-SkipEntra)' } else { 'Full (Azure + Entra)' }
+    $mode  = Get-RunModeLabel
     $dpMode = if ($script:State.Config.IncludeDataPlane) { 'enabled (-IncludeDataPlane)' } else { 'disabled' }
 
     Write-UiHost -Text ("  Mode:     " + $mode) -Color Gray
