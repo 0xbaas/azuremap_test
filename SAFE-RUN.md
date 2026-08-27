@@ -39,72 +39,80 @@ Graph token. Tokens are never printed, logged, or written to any export.
 
 ```powershell
 # Full audit (Azure + Entra). Requires ARM + Graph auth.
-.\AzureMap.ps1 -VerboseOutput
+.\azuremap.ps1 -VerboseOutput
 
 # Azure-only. No Graph token is requested; no tenant-wide identity collection.
-.\AzureMap.ps1 -SkipEntra -VerboseOutput
+.\azuremap.ps1 -SkipEntra -VerboseOutput
+
+# Azure-only + data-plane checks (opt-in; safe metadata only - never values).
+.\azuremap.ps1 -SkipEntra -VerboseOutput -IncludeDataPlane
 
 # Proceed even if Graph auth is unavailable: runs Azure-only and marks Entra /
 # tenant-dependent checks as NotEvaluated (never a false "clean" pass).
-.\AzureMap.ps1 -ContinueWithoutEntra -VerboseOutput
+.\azuremap.ps1 -ContinueWithoutEntra -VerboseOutput
+
+# Redact sensitive identifiers (emails/GUIDs, public IPs) in console + exports.
+.\azuremap.ps1 -SkipEntra -VerboseOutput -RedactSensitive -RedactPublicIps
 ```
 
 Relevant switches:
 
 - `-SkipEntra` — Azure-only. Skips the Graph token, Entra collection, and all
   Graph/AAD-backed tenant identity collection.
+- `-IncludeDataPlane` — opt-in data-plane checks (STORAGE-004 anonymous blob
+  access, KEYVAULT-003 secret expiry). Off by default. Even when enabled,
+  only safe metadata is read: container names/public-access levels and secret
+  name/enabled/created/expires. Never secret values, keys, SAS tokens,
+  connection strings, or blob/file content.
 - `-ContinueWithoutEntra` — if Graph authentication is unavailable, continue with
   the Azure-only checks instead of stopping; Entra checks report `NotEvaluated`.
+- `-RedactSensitive` / `-RedactPublicIps` — mask emails/GUIDs and public IP
+  addresses in console output and exports.
 - `-Quiet` — suppress console output (the log file and exports are still written).
 - `-VerboseOutput` / `-DebugOutput` — more operational detail on the console.
   These add counts and labels only; they never print raw objects, tokens, or
   identifiers.
 
-## Pre-live validation sequence
+The console summary includes a **Capability insights** section (top 5): read-only
+modeling that connects findings into higher-order risk (public exposure +
+privileged identity, Shared Key + key-capable RBAC, and similar). The full
+capability graph is in the JSON export (`CapabilityModel`) and the HTML
+"Capability Insights" section. It is inference from collected metadata, not
+exploitation.
 
-Run these in order. Steps 1 and 3 need no cloud access; steps 2 and 4 read your
-Azure environment (read-only).
+## Release smoke checklist
 
-### 1. Unit tests (no cloud access)
+Run these in order before tagging a release. Steps 1–2 need no cloud access;
+steps 3–5 read your Azure environment (read-only).
 
-```powershell
-Invoke-Pester -Path .\Tests\Unit -Output Detailed
-```
+- [ ] **1. Unit tests** — `Invoke-Pester -Path .\Tests\Unit -Output Normal` — all pass.
+- [ ] **2. Integration tests** — `Invoke-Pester -Path .\Tests\Integration -Output Normal` — all pass.
+- [ ] **3. Azure-only run** — `.\azuremap.ps1 -SkipEntra -VerboseOutput`
+- [ ] **4. Data-plane run (optional)** — `.\azuremap.ps1 -SkipEntra -VerboseOutput -IncludeDataPlane`
+- [ ] **5. Redaction run (optional)** — `.\azuremap.ps1 -SkipEntra -VerboseOutput -RedactSensitive -RedactPublicIps`
 
-Expected: all unit tests pass.
+For each run (3–5), verify:
 
-### 2. Azure-only smoke test
+- no interactive prompts (the run completes unattended, exit code 0);
+- no raw `[Severity/Finding/Count]` finding blocks, no Az module warning
+  leaks, no remediation commands, no `Source` line in the normal CLI;
+- permission problems appear as clean `Could not check` / `Partially checked`
+  summaries — no Forbidden/403 spam;
+- the CLI summary shows Scope, Status, Findings, Capability insights (top 5),
+  Performance, and Exports sections;
+- `AzureSecurityAudit-<timestamp>.csv / -Detailed.csv / .json / .html` are all
+  generated; JSON contains `CapabilityModel` and the correct
+  `DataPlaneIncluded` flag; HTML contains the "Capability Insights" section;
+- finding group counts, affected resources, and severity distribution match
+  the previous accepted run (no lost findings, no false "Clean");
+- with `-IncludeDataPlane`: STORAGE-004 / KEYVAULT-003 run with safe metadata
+  only; with redaction switches: identifiers are masked in exports.
 
-```powershell
-.\AzureMap.ps1 -SkipEntra -VerboseOutput
-```
-
-Expected:
-- no Microsoft Graph token request;
-- no Entra collection;
-- no tenant-wide identity collection;
-- no `MicrosoftGraphEndpointResourceId` error;
-- no mass "The property 'Id' cannot be found" errors from the engine;
-- no summary/export crash;
-- a clean Check Execution Summary.
-
-### 3. Full run without Graph auth
-
-```powershell
-.\AzureMap.ps1 -VerboseOutput
-```
-
-Expected:
-- clean, actionable guidance:
-  `Connect-AzAccount -AuthScope "https://graph.microsoft.com"`;
-- no raw stack trace;
-- no reconnect loop and no automatic `Connect-AzAccount`.
-
-### 4. Full run with Graph auth
+### Full run with Graph auth
 
 ```powershell
 Connect-AzAccount -AuthScope "https://graph.microsoft.com"
-.\AzureMap.ps1 -VerboseOutput
+.\azuremap.ps1 -VerboseOutput
 ```
 
 Expected:
@@ -124,13 +132,8 @@ object IDs, principal names, and resource IDs. Treat these files as sensitive:
   (`*.log`, `AzureSecurityAudit-*.*`, `testResults.xml`, and the `output/`,
   `logs/`, `exports/`, `debug/`, `raw/` directories).
 - Store and share them only through approved, access-controlled channels.
+- Use `-RedactSensitive` / `-RedactPublicIps` when reports must leave the
+  secured environment with identifiers masked.
 
-## Legacy files (retained, not used by the modular tool)
-
-These remain in the repository for reference and have **not** been deleted:
-
-- `AzureMap - Copy - Copy.ps1` — the original monolithic script.
-- `azure_resources.ps1` — legacy standalone script.
-
-The supported entry point is `azuremap.ps1` (invoked as `.\AzureMap.ps1`), which
-loads the modular `Core/`, `Checks/`, and `Export/` components.
+The supported entry point is `azuremap.ps1`, which loads the modular `Core/`,
+`Checks/`, and `Export/` components.

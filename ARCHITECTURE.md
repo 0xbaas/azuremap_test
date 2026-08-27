@@ -134,6 +134,21 @@ source-grep tests).
 
 
 
+## Phase B3: data-plane gating
+
+Data-plane checks are opt-in (-IncludeDataPlane) and disabled by default; a
+default run is control-plane only. Registration flag RequiresDataPlane on the
+check definition gates execution (Skipped: data-plane checks disabled) and
+flows to execution records (DataPlaneRequired) so exports can show gated
+checks even when they never ran. Only STORAGE-004 (blob container names +
+public-access levels) and KEYVAULT-003 (secret name/enabled/created/expires)
+are data-plane checks; both read safe metadata only - never secret values,
+keys, SAS tokens, connection strings, or blob/file content. Permission
+failures degrade to Partial/NotEvaluated with coverage metadata, never to a
+false Pass. JSON Metadata.DataPlaneIncluded records the mode.
+
+
+
 ## Phase B1: Status x Coverage contract
 
 Canonical check statuses (Core/RunStatus.ps1):
