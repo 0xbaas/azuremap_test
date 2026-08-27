@@ -55,21 +55,67 @@ Actions) — but it never invokes that action.
 - Permission failures degrade to `Partially checked` / `Could not check` —
   never to a false "Clean".
 
-## Capability modeling (B2, AzureMap only)
+## Capability modeling (B2)
 
 - The capability model is built from already-collected metadata (findings,
   cached inventory/RBAC, role definitions, footprint) with **no additional
   API calls**.
 - It is read-only **inference** about what a principal could do — not proof
   of exploitability, and never an attempt to prove it.
+- The model is per-product, on shared primitives (`Shared/Core/Capability.ps1`):
+  Azure builders in `Products/AzureMap/Capability/CapabilityModel.Azure.ps1`, Entra builders in
+  `Products/EntraMap/Capability/CapabilityModel.Entra.ps1`. Both perform zero API calls.
+
+## EntraMap safety model
+
+EntraMap reads Microsoft Graph metadata only. Concretely:
+
+**NEVER retrieves:**
+
+- client secret values or app secret values (only credential **metadata**:
+  displayName/keyId/type/start/end)
+- certificate private keys (only certificate metadata)
+- refresh tokens, or access tokens of any kind other than the current
+  session's own Graph token (which is never printed, logged, or exported)
+- passwords or authentication-method secrets
+- mailbox, file, chat, or any other content data
+
+**NEVER performs:**
+
+- any write, update, or delete operation (every Graph call is a `GET`; the
+  only `POST` is the `/$batch` envelope whose inner requests are all forced
+  to `GET` inside `Invoke-GraphBatch`)
+- consent grants or revocations
+- role assignment changes (no add/remove of directory role assignments, no
+  PIM activation)
+- Conditional Access policy changes
+- app credential changes (no add/remove of secrets or certificates)
+- password resets, or user/group/app modifications of any kind
+- authentication for you (no `Connect-AzAccount` inside runtime)
+
+**ALLOWED (read-only metadata):**
+
+- Graph `GET` / list / `$batch` read-only metadata queries
+- role definition and role assignment metadata, PIM schedule metadata
+- application and service principal metadata, ownership metadata
+- app credential **metadata** — displayName/start/end/keyId/type only
+- OAuth2 permission grant (consent) metadata
+- policy metadata (Conditional Access, authentication methods, cross-tenant)
 
 ## Enforcement
 
-`Tests/Unit/Phase22.DataPlane.Tests.ps1` and
-`Tests/Unit/Phase24.CapabilityModel.Tests.ps1` grep the runtime source for
+`Tests/AzureMap/Phase22.DataPlane.Tests.ps1` and
+`Tests/AzureMap/Phase24.CapabilityModel.Tests.ps1` grep the runtime source for
 forbidden call patterns (key/secret/content retrieval, invocation cmdlets in
 the capability model) and fail the build if any appear. Static permission
 strings used for read-only modeling are explicitly allowed; invocation is not.
-`Tests/Unit/Phase25.Split.Tests.ps1` proves the product boundary itself: an
+`Tests/Shared/Phase25.Split.Tests.ps1` proves the product boundary itself: an
 AzureMap session contains no Graph token code, and an EntraMap session
 contains no ARM discovery/scanning code.
+`Tests/EntraMap/Phase27.EntraCapability.Tests.ps1` extends the static guards to
+the whole Entra product surface (`Products/EntraMap/Core/`, `Products/EntraMap/Checks/`,
+`entramap.ps1`): no write-verb Az/AzureAD/Mg cmdlets, no secret/key retrieval
+patterns, no non-GET Graph methods or `-AllowNonGet` outside
+`Products/EntraMap/Core/Graph.ps1`, no bare `Connect-AzAccount` invocation, and no
+Graph/Azure call surface at all in the Entra capability model (backed by a
+runtime test with every Graph/Azure entry point stubbed to throw).

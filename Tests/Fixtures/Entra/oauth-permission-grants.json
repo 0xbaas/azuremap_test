@@ -1,0 +1,12 @@
+{
+  "value": [
+    {
+      "id": "c4c40001-0000-4000-8000-000000000001",
+      "clientId": "dddd0004-0000-4000-8000-000000000003",
+      "resourceId": "dddd0004-0000-4000-8000-0000000000ff",
+      "resourceName": "Microsoft Graph",
+      "consentType": "AllPrincipals",
+      "scope": "User.Read"
+    }
+  ]
+}

@@ -113,15 +113,15 @@ BeforeAll {
     }
 
     # Source the shared per-run inventory cache used by converted checks
-    . "$ProjectRoot\Core\Azure\InventoryCache.ps1"
+    . "$ProjectRoot\Products\AzureMap\Core\InventoryCache.ps1"
 
     # Source all v2 check files (plus the relocated tenant-identity checks so
     # the loadable-function sweep still covers them)
-    $checkFiles = Get-ChildItem (Join-Path $ProjectRoot "Checks\Azure\*.ps1")
+    $checkFiles = Get-ChildItem (Join-Path $ProjectRoot "Products\AzureMap\Checks\*.ps1")
     foreach ($f in $checkFiles) {
         . $f.FullName
     }
-    . (Join-Path $ProjectRoot "Checks\Entra\TenantIdentity.ps1")
+    . (Join-Path $ProjectRoot "Products\EntraMap\Checks\TenantIdentity.ps1")
 }
 
 BeforeEach {

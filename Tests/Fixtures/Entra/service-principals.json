@@ -1,0 +1,59 @@
+{
+  "value": [
+    {
+      "id": "dddd0004-0000-4000-8000-000000000001",
+      "appId": "cccc0003-0000-4000-8000-0000000000a1",
+      "displayName": "sp-ci-cd",
+      "servicePrincipalType": "Application",
+      "accountEnabled": true,
+      "appRoleAssignments": [
+        {
+          "id": "b3b30001-0000-4000-8000-000000000001",
+          "resourceId": "dddd0004-0000-4000-8000-0000000000ff",
+          "resourceDisplayName": "Microsoft Graph",
+          "appRoleId": "9e3f62cf-a59c-4bb7-a043-3a3f3b3f0001",
+          "appRoleValue": "RoleManagement.ReadWrite.Directory"
+        },
+        {
+          "id": "b3b30001-0000-4000-8000-000000000002",
+          "resourceId": "dddd0004-0000-4000-8000-0000000000ff",
+          "resourceDisplayName": "Microsoft Graph",
+          "appRoleId": "9e3f62cf-a59c-4bb7-a043-3a3f3b3f0002",
+          "appRoleValue": "AppRoleAssignment.ReadWrite.All"
+        }
+      ]
+    },
+    {
+      "id": "dddd0004-0000-4000-8000-000000000002",
+      "appId": "cccc0003-0000-4000-8000-0000000000a2",
+      "displayName": "app-github-federation",
+      "servicePrincipalType": "Application",
+      "accountEnabled": true,
+      "appRoleAssignments": [
+        {
+          "id": "b3b30001-0000-4000-8000-000000000003",
+          "resourceId": "dddd0004-0000-4000-8000-0000000000ff",
+          "resourceDisplayName": "Microsoft Graph",
+          "appRoleId": "9e3f62cf-a59c-4bb7-a043-3a3f3b3f0003",
+          "appRoleValue": "Directory.ReadWrite.All"
+        }
+      ]
+    },
+    {
+      "id": "dddd0004-0000-4000-8000-000000000003",
+      "appId": "cccc0003-0000-4000-8000-0000000000a3",
+      "displayName": "sp-basic",
+      "servicePrincipalType": "Application",
+      "accountEnabled": true,
+      "appRoleAssignments": [
+        {
+          "id": "b3b30001-0000-4000-8000-000000000004",
+          "resourceId": "dddd0004-0000-4000-8000-0000000000ff",
+          "resourceDisplayName": "Microsoft Graph",
+          "appRoleId": "9e3f62cf-a59c-4bb7-a043-3a3f3b3f0004",
+          "appRoleValue": "User.Read"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "value": [
+    {
+      "id": "aaaa0001-0000-4000-8000-000000000001",
+      "displayName": "Admin One",
+      "userPrincipalName": "admin1@contoso.onmicrosoft.com",
+      "accountEnabled": true,
+      "userType": "Member"
+    },
+    {
+      "id": "aaaa0001-0000-4000-8000-000000000002",
+      "displayName": "Admin Two",
+      "userPrincipalName": "admin2@contoso.onmicrosoft.com",
+      "accountEnabled": true,
+      "userType": "Member"
+    },
+    {
+      "id": "aaaa0001-0000-4000-8000-000000000003",
+      "displayName": "Ext Vendor (Contoso)",
+      "userPrincipalName": "extuser_vendor.com#EXT#@contoso.onmicrosoft.com",
+      "accountEnabled": true,
+      "userType": "Guest"
+    },
+    {
+      "id": "aaaa0001-0000-4000-8000-000000000004",
+      "displayName": "Breakglass Admin",
+      "userPrincipalName": "breakglass@contoso.onmicrosoft.com",
+      "accountEnabled": false,
+      "userType": "Member"
+    },
+    {
+      "id": "aaaa0001-0000-4000-8000-000000000005",
+      "displayName": "App Owner",
+      "userPrincipalName": "appowner@contoso.onmicrosoft.com",
+      "accountEnabled": true,
+      "userType": "Member"
+    }
+  ]
+}

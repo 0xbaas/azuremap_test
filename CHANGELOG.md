@@ -8,14 +8,16 @@ All notable AzureMap phases, newest first. Tags mark each accepted phase.
   `azuremap.ps1` (AzureMap — Azure subscriptions, ARM control plane only,
   never touches Microsoft Graph) and `entramap.ps1` (EntraMap — Entra ID
   tenant via Microsoft Graph, no subscription discovery or ARM scanning).
-- Shared core stays in `Core/` (Logging, Console, State, RunStatus,
+- Shared core lives in `Shared/Core/` (Logging, Console, State, RunStatus,
   CheckRegistry, Retry, Cache, Config, Exclusions, Redaction, capability
-  primitives); product cores live in `Core/Azure/` (ResourceGraph, Footprint,
-  InventoryCache, Rbac, CapabilityModel.Azure, Preflight.Azure) and
-  `Core/Entra/` (Graph, Collection, TenantWide, Preflight.Entra).
+  primitives) with exporters in `Shared/Export/`; product code lives in
+  `Products/AzureMap/` (Core: ResourceGraph, Footprint, InventoryCache, Rbac,
+  Preflight.Azure; Capability: CapabilityModel.Azure; Checks) and
+  `Products/EntraMap/` (Core: Graph, Collection, TenantWide, Preflight.Entra;
+  Capability: CapabilityModel.Entra; Checks).
 - Tenant-wide identity checks IDENTITY-001 (long-lived credentials),
   IDENTITY-002 (dormant service principals) and IDENTITY-004 (expired
-  credentials) relocated to EntraMap (`Checks/Entra/TenantIdentity.ps1`) —
+  credentials) relocated to EntraMap (`Products/EntraMap/Checks/TenantIdentity.ps1`) —
   CheckIds and check logic unchanged. In EntraMap (no Azure subscription
   scope) the IDENTITY-002 RBAC correlation is reported as NotEvaluated
   instead of a false clean pass.
@@ -32,6 +34,51 @@ All notable AzureMap phases, newest first. Tags mark each accepted phase.
   ("Azure Security Assessment" / "Entra ID Security Assessment").
 - New Phase25 split tests prove each product session carries only its own
   surface (no Graph code in AzureMap, no ARM discovery code in EntraMap).
+- EntraMap product baseline (Phases 26–28):
+  - Tenant footprint/discovery (`Build-EntraFootprint`): tenant/account plus
+    per-dimension counts (users, groups, service principals, app
+    registrations, directory roles, role assignments, CA policies, guest
+    users, app credential metadata) with per-dimension degradation and
+    per-permission-class denial classification; in-memory only.
+  - EntraMap CLI blocks: Assessment scope (mode/tenant/account/Graph access,
+    "Azure subscriptions: not scanned"), Discovery, and an assessment plan
+    with a permission-limited count; checks grouped under six human groups
+    (Identity & roles, Applications, Conditional Access, Authentication,
+    Collaboration, Workload identity).
+  - Graph permission gating: checks register `RequiredPerms`; the token's
+    `roles`/`scp` claims are decoded once per run — provably-underprivileged
+    checks are planned as limited and reported `Could not check` with a
+    clear reason; opaque/undecodable tokens fail open (never faked).
+  - Entra capability model (`Build-EntraCapabilityModel` on the shared B2
+    primitives): 10 insight types (standing privilege combinations, PIM
+    control gaps, dangerous app permissions + weak ownership/federation,
+    guest privileged access, CA gaps, ...), same severity/confidence
+    discipline and output shape as AzureMap — CLI top 5, HTML top 25, JSON
+    `CapabilityModel`. Zero Graph calls (runtime-pinned with stubs).
+  - Redaction verified for Entra identifiers: `-RedactSensitive` masks
+    UPNs/emails (including B2B guest `#EXT#` UPNs — fixed a local-part
+    remnant gap) and all GUID classes (tenant/app/object IDs) in CSV, JSON,
+    and HTML exports; AzureMap redaction behavior unchanged.
+  - IDENTITY-002/004 report their no-subscription-scope degradation with
+    explicit Entra-context wording (NotEvaluated, never a false clean pass).
+  - Tests: Phase26 (product baseline, 28 tests), Phase27 (Entra capability
+    model + Entra-wide static safety greps, 32 tests), Phase28 (Entra export
+    redaction, 7 tests); synthetic Graph fixtures under `Tests/Fixtures/Entra/`.
+- Repository layout refactor (structure-only; no logic changes):
+  - Product trees `Products/AzureMap/` and `Products/EntraMap/` now hold each
+    product's real entrypoint plus its `Core/`, `Capability/`, `Checks/`, and
+    `Docs/`; the old top-level `Core/`, `Checks/`, `Export/`, and `Docs/`
+    directories are gone.
+  - Shared framework moved to `Shared/Core/` and `Shared/Export/`.
+  - Root `azuremap.ps1` / `entramap.ps1` remain as thin compatibility
+    wrappers (identical parameter surface, pass-through to the product
+    entrypoints) — operator workflow and automation are unchanged.
+  - Tests reorganized: `Tests/AzureMap/` and `Tests/EntraMap/` (per-product
+    tests), `Tests/Shared/` (shared framework + product-split guards);
+    `Tests/Integration/` and `Tests/Fixtures/` unchanged. Suite unchanged at
+    532 unit + 16 integration tests, all green.
+  - `ReferenceData/` intentionally stays at the repo root: both JSON files
+    are currently consumed only by EntraMap collection.
 
 ## Release candidate (unreleased)
 

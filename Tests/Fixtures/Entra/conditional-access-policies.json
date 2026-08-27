@@ -1,0 +1,17 @@
+{
+  "value": [
+    {
+      "id": "d5d50001-0000-4000-8000-000000000001",
+      "displayName": "CA-ReportOnly-MFA-AllUsers",
+      "state": "enabledForReportingButNotEnforced",
+      "conditions": {
+        "users": { "includeUsers": [ "All" ] },
+        "clientAppTypes": [ "all" ]
+      },
+      "grantControls": {
+        "operator": "OR",
+        "builtInControls": [ "mfa" ]
+      }
+    }
+  ]
+}

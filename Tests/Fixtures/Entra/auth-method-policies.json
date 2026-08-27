@@ -1,0 +1,21 @@
+{
+  "id": "authenticationMethodsPolicy",
+  "authenticationMethodConfigurations": [
+    {
+      "id": "Sms",
+      "state": "enabled"
+    },
+    {
+      "id": "Voice",
+      "state": "disabled"
+    },
+    {
+      "id": "Fido2",
+      "state": "disabled"
+    },
+    {
+      "id": "MicrosoftAuthenticator",
+      "state": "enabled"
+    }
+  ]
+}

@@ -102,17 +102,26 @@ Relevant switches:
 - `-Quiet`, `-VerboseOutput`, `-DebugOutput` — same console discipline as
   AzureMap.
 
+The console summary includes a **Capability insights** section (top 5): read-only
+modeling that connects findings into higher-order risk (standing privileged
+roles without PIM or MFA, dangerous app permissions combined with weak
+ownership or federation, guest privileged access, Conditional Access gaps).
+The full model is in the JSON export (`CapabilityModel`) and the HTML
+"Capability Insights" section. It is inference from collected metadata, not
+exploitation.
+
 ## Release smoke checklist
 
 Run these in order before tagging a release. Steps 1–2 need no cloud access;
-steps 3–6 read your environment (read-only).
+steps 3–7 read your environment (read-only).
 
-- [ ] **1. Unit tests** — `Invoke-Pester -Path .\Tests\Unit -Output Normal` — all pass.
+- [ ] **1. Unit tests** — `Invoke-Pester -Path .\Tests -Output Normal` — all pass (whole tree: `.\Tests\AzureMap`, `.\Tests\EntraMap`, `.\Tests\Shared`; per-folder runs also work).
 - [ ] **2. Integration tests** — `Invoke-Pester -Path .\Tests\Integration -Output Normal` — all pass.
 - [ ] **3. AzureMap run** — `.\azuremap.ps1 -VerboseOutput`
 - [ ] **4. AzureMap data-plane run (optional)** — `.\azuremap.ps1 -VerboseOutput -IncludeDataPlane`
 - [ ] **5. AzureMap redaction run (optional)** — `.\azuremap.ps1 -VerboseOutput -RedactSensitive -RedactPublicIps`
 - [ ] **6. EntraMap run** — `Connect-AzAccount -AuthScope "https://graph.microsoft.com"`, then `.\entramap.ps1 -VerboseOutput`
+- [ ] **7. EntraMap redaction run (optional)** — `.\entramap.ps1 -VerboseOutput -RedactSensitive`
 
 For each AzureMap run (3–5), verify:
 
@@ -134,14 +143,40 @@ For each AzureMap run (3–5), verify:
 For the EntraMap run (6), verify:
 
 - Graph preflight succeeds without any subscription prompt or discovery;
+- the **Assessment scope** block shows mode `Entra-only`, tenant, account,
+  Graph access `available`, and `Azure subscriptions: not scanned`;
+- the **Discovery** block shows real tenant counts (users, groups, service
+  principals, app registrations, directory roles, role assignments, CA
+  policies, guest users, app credentials); denied dimensions degrade to
+  `unavailable (reason)` — never raw Graph error text;
+- the **assessment plan** prints relevant vs permission-limited counts (no
+  limited count when the token's scopes cannot be decoded);
+- per-check lines render grouped under the six human groups (Identity &
+  roles, Applications, Conditional Access, Authentication, Collaboration,
+  Workload identity);
 - Entra checks (ENTRA-01..12) and the relocated identity checks
   (IDENTITY-001/002/004) register and execute;
 - IDENTITY-002 reports its RBAC correlation as `Could not check` (no Azure
-  subscription scope) — never a false "Clean";
+  subscription scope) — never a false "Clean"; IDENTITY-004 likewise;
 - permission/collection failures become `Error` / `Could not check` /
   diagnostic items — never a false "Clean";
+- the CLI summary shows a **Capability insights** section (top 5); the HTML
+  report contains the "Capability Insights" section and the JSON export a
+  `CapabilityModel` block;
 - the exports (`AzureSecurityAudit-<timestamp>.*`) and the
-  `EntraMap-<timestamp>.log` run log are generated.
+  `EntraMap-<timestamp>.log` run log are generated; the run completes
+  unattended (no prompts, exit code 0).
+
+For the EntraMap redaction run (7), additionally verify: UPNs/emails
+(including guest `#EXT#` UPNs, with no unmasked remnant), the tenant ID, and
+app/object GUIDs are masked in the CSV, JSON, and HTML exports.
+
+**Live-validation note:** live EntraMap validation requires a session that
+can acquire a Microsoft Graph token. The current COA session blocks this via
+Conditional Access, so steps 6–7 may be blocked in this environment; the
+mocked test suites (including a fully mocked end-to-end run) cover the same
+behaviors until a Graph-capable session is available. Do not attempt to
+bypass Conditional Access or weaken authentication to run them.
 
 ## Sensitive output warning
 
@@ -158,5 +193,7 @@ Treat these files as sensitive:
   secured environment with identifiers masked.
 
 The supported entry points are `azuremap.ps1` (Azure) and `entramap.ps1`
-(Entra ID), which load the modular `Core/`, `Checks/`, and `Export/`
-components.
+(Entra ID) — thin root wrappers that pass all parameters through to the real
+entrypoints in `Products/AzureMap/` and `Products/EntraMap/`, which load the
+modular `Shared/Core/`, per-product `Core/`/`Capability/`/`Checks/`, and
+`Shared/Export/` components.

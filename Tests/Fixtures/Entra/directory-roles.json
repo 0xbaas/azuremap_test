@@ -1,0 +1,56 @@
+{
+  "roleDefinitions": [
+    {
+      "id": "f1f1f1f1-0000-4000-8000-000000000001",
+      "displayName": "Global Administrator",
+      "description": "Can manage all aspects of Microsoft Entra ID.",
+      "isBuiltIn": true,
+      "isEnabled": true,
+      "templateId": "62e90394-69f5-4237-9190-012177145e10"
+    },
+    {
+      "id": "f1f1f1f1-0000-4000-8000-000000000002",
+      "displayName": "Privileged Role Administrator",
+      "description": "Can manage role assignments and PIM.",
+      "isBuiltIn": true,
+      "isEnabled": true,
+      "templateId": "e8611ab8-c189-46e8-94e1-60213ab1f814"
+    }
+  ],
+  "roleAssignments": [
+    {
+      "id": "a2a20001-0000-4000-8000-000000000001",
+      "roleDefinitionId": "f1f1f1f1-0000-4000-8000-000000000001",
+      "principalId": "aaaa0001-0000-4000-8000-000000000001",
+      "directoryScopeId": "/"
+    },
+    {
+      "id": "a2a20001-0000-4000-8000-000000000002",
+      "roleDefinitionId": "f1f1f1f1-0000-4000-8000-000000000001",
+      "principalId": "aaaa0001-0000-4000-8000-000000000003",
+      "directoryScopeId": "/"
+    },
+    {
+      "id": "a2a20001-0000-4000-8000-000000000003",
+      "roleDefinitionId": "f1f1f1f1-0000-4000-8000-000000000001",
+      "principalId": "aaaa0001-0000-4000-8000-000000000002",
+      "directoryScopeId": "/"
+    },
+    {
+      "id": "a2a20001-0000-4000-8000-000000000004",
+      "roleDefinitionId": "f1f1f1f1-0000-4000-8000-000000000002",
+      "principalId": "bbbb0002-0000-4000-8000-000000000001",
+      "directoryScopeId": "/"
+    }
+  ],
+  "roleEligibilitySchedules": [
+    {
+      "id": "e3e30001-0000-4000-8000-000000000001",
+      "roleDefinitionId": "f1f1f1f1-0000-4000-8000-000000000001",
+      "principalId": "aaaa0001-0000-4000-8000-000000000002",
+      "directoryScopeId": "/",
+      "status": "Provisioned"
+    }
+  ],
+  "roleAssignmentSchedules": []
+}

@@ -26,8 +26,8 @@ Connect-AzAccount -AuthScope "https://graph.microsoft.com"
 
 ## Documentation
 
-- [Docs/AzureMap.md](Docs/AzureMap.md) — AzureMap: modes/flags, data-plane contract, redaction, capability insights, runtime, limitations
-- [Docs/EntraMap.md](Docs/EntraMap.md) — EntraMap: Graph auth, collected tenant data, checks and permissions, limitations
+- [Products/AzureMap/Docs/AzureMap.md](Products/AzureMap/Docs/AzureMap.md) — AzureMap: modes/flags, data-plane contract, redaction, capability insights, runtime, limitations
+- [Products/EntraMap/Docs/EntraMap.md](Products/EntraMap/Docs/EntraMap.md) — EntraMap: Graph auth, collected tenant data, checks and permissions, limitations
 - [SAFE-RUN.md](SAFE-RUN.md) — safe-run guide and release smoke checklists
 - [SAFETY.md](SAFETY.md) — safety rules (what the tools may and may not do)
 - [ARCHITECTURE.md](ARCHITECTURE.md) — module layout, product split, status×coverage contract, caching, capability model
@@ -36,11 +36,14 @@ Connect-AzAccount -AuthScope "https://graph.microsoft.com"
 ## Tests
 
 ```powershell
-# Unit tests (no cloud access needed)
-Invoke-Pester -Path .\Tests\Unit -Output Normal
+# Full suite (no cloud access needed; unit + integration in one run)
+Invoke-Pester -Path .\Tests -Output Normal
 
-# Integration tests (offline equivalence checks)
-Invoke-Pester -Path .\Tests\Integration -Output Normal
+# Per area
+Invoke-Pester -Path .\Tests\AzureMap -Output Normal    # AzureMap product tests
+Invoke-Pester -Path .\Tests\EntraMap -Output Normal    # EntraMap product tests
+Invoke-Pester -Path .\Tests\Shared -Output Normal      # shared framework + product-split guards
+Invoke-Pester -Path .\Tests\Integration -Output Normal # offline equivalence checks
 ```
 
 The suite includes safety guards that grep the runtime source to prove no key/secret/content retrieval paths exist, and split guards that prove each product session carries only its own surface (no Graph code in AzureMap, no ARM discovery code in EntraMap).

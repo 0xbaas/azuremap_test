@@ -1,0 +1,614 @@
+# ============================================================================
+# AzureMap - Identity Security Checks (Azure ARM/RBAC scope)
+# ============================================================================
+# Functions:
+#   Test-ExcessiveRBAC             (IDENTITY-003)
+#   Test-CustomRoles               (IDENTITY-005)
+#   Test-IdentityResourceMapping   (IDENTITY-006)
+#   Register-AzureIdentityChecks
+# (IDENTITY-001/002/004 - tenant credential hygiene - relocated to
+#  Products/EntraMap/Checks/TenantIdentity.ps1 for the EntraMap product split.)
+# ============================================================================
+
+function Test-ExcessiveRBAC {
+    param(
+        [array]$Subscriptions,
+        [hashtable]$Exclusions,
+        [int]$ProgressId = 0
+    )
+    
+    Write-Section -Title "RBAC - EXCESSIVE PRIVILEGES AT SUBSCRIPTION SCOPE" -Color "Yellow" -ProgressId $ProgressId
+    
+    $rbacFindings = New-Object System.Collections.Generic.List[object]
+    $totalProcessed = 0
+    
+    foreach ($sub in $Subscriptions) {
+        $totalProcessed++
+        
+        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+            Write-Progress -Activity "Checking Excessive RBAC" `
+                          -Status "Subscription: $($sub.Name) (skipped)" `
+                          -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
+                          -Id $ProgressId
+            continue
+        }
+        
+        Write-Progress -Activity "Checking Excessive RBAC" `
+                      -Status "Subscription: $($sub.Name)" `
+                      -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
+                      -Id $ProgressId
+        
+        try {
+            $assignments = Get-SubscriptionRBACAssignments -SubscriptionId $sub.Id -SubscriptionName $sub.Name
+            
+            foreach ($assignment in $assignments) {
+                # Determine scope type
+                $scopeType = "Unknown"
+                if ($assignment.Scope -eq "/") {
+                    $scopeType = "Root"
+                } elseif ($assignment.Scope -like "/providers/Microsoft.Management/managementGroups/*") {
+                    $scopeType = "ManagementGroup"
+                } elseif ($assignment.Scope -match "^/subscriptions/[^/]+$") {
+                    $scopeType = "Subscription"
+                } elseif ($assignment.Scope -match "^/subscriptions/[^/]+/resourceGroups/") {
+                    if ($assignment.Scope -match "/providers/") {
+                        $scopeType = "Resource"
+                    } else {
+                        $scopeType = "ResourceGroup"
+                    }
+                } else {
+                    $scopeType = "Other"
+                }
+                
+                # Only report elevated scopes
+                if ($scopeType -in @("Root", "ManagementGroup", "Subscription")) {
+                    $role = "$($assignment.RoleDefinitionName)"
+                    $severity = "MEDIUM"  # Default for unknown roles
+
+                    # Guard: a null/empty role name must never reach ContainsKey
+                    # ("Key cannot be null") - unknown roles fall back to the
+                    # scope-based default severity.
+                    if (-not [string]::IsNullOrWhiteSpace($role) -and $script:State.Config.RBACSeverity.ContainsKey($role)) {
+                        if ($script:State.Config.RBACSeverity[$role].ContainsKey($scopeType)) {
+                            $severity = $script:State.Config.RBACSeverity[$role][$scopeType]
+                        } else {
+                            # Fallback: Use subscription severity for unknown scope
+                            $severity = $script:State.Config.RBACSeverity[$role]["Subscription"]
+                        }
+                    } else {
+                        # Unknown role - use scope-based default
+                        $severity = switch ($scopeType) {
+                            "Root" { "HIGH" }
+                            "ManagementGroup" { "MEDIUM" }
+                            "Subscription" { "MEDIUM" }
+                            default { "LOW" }
+                        }
+                    }
+                    
+                    $principalName = if ($assignment.DisplayName) { $assignment.DisplayName } else { "Unknown" }
+                    
+                    $rbacFindings.Add([PSCustomObject]@{
+                        SubscriptionId = $sub.Id
+                        SubscriptionName = $sub.Name
+                        Scope = $assignment.Scope
+                        ScopeType = $scopeType
+                        RoleDefinitionName = $role
+                        PrincipalName = $principalName
+                        PrincipalType = $assignment.ObjectType
+                        AssignmentId = $assignment.RoleAssignmentId
+                        Severity = $severity
+                    })
+                }
+            }
+        }
+        catch {
+            Write-AuditLog -Message "Failed to check RBAC assignments in subscription $($sub.Name): $_" -Level ERROR
+        }
+    }
+    
+    # If Azure RBAC could not be read for one or more subscriptions, surface a single
+    # NotEvaluated finding so the check is never a misleading clean PASS.
+    $rbacUnavailable = @($Subscriptions | Where-Object {
+        (-not [string]::IsNullOrWhiteSpace("$($_.Id)")) -and
+        $script:State.Cache.RBACUnavailable.ContainsKey($_.Id) -and $script:State.Cache.RBACUnavailable[$_.Id]
+    })
+    if ($rbacUnavailable.Count -gt 0) {
+        Write-Finding -Severity "INFO" `
+                      -Message "RBAC assignments could not be evaluated for one or more subscriptions (Azure RBAC read unavailable under current authentication)" `
+                      -Count $rbacUnavailable.Count `
+                      -Data (@($rbacUnavailable | ForEach-Object { [PSCustomObject]@{ SubscriptionName = $_.Name } })) `
+                      -Service "Identity" `
+                      -Status "NOTEVALUATED" `
+                      -Remediation "Re-run with Azure + Entra (Graph) authentication, or ensure the ARM permission Microsoft.Authorization/roleAssignments/read is granted, to evaluate excessive privileges." `
+                      -Exclusions $Exclusions `
+                      -SubscriptionId "Multiple" `
+                      -SubscriptionName "Multiple"
+    }
+    elseif ($rbacFindings.Count -eq 0) {
+        # Explicit PASS record: assignments were read (no RBACUnavailable flags)
+        # and no elevated subscription-scope assignments were found. Silence is
+        # never proof of evaluation.
+        Write-Finding -Severity "INFO" `
+                      -Message "No excessive subscription-scope RBAC assignments found" `
+                      -Count 0 `
+                      -Service "Identity" `
+                      -Status "PASS" `
+                      -Exclusions $Exclusions `
+                      -SubscriptionId "Multiple" `
+                      -SubscriptionName "Multiple"
+    }
+
+    # Group findings by severity
+    $criticalFindings = @($rbacFindings | Where-Object { $_.Severity -eq "CRITICAL" })
+    $highFindings = @($rbacFindings | Where-Object { $_.Severity -eq "HIGH" })
+    $mediumFindings = @($rbacFindings | Where-Object { $_.Severity -eq "MEDIUM" })
+    $lowFindings = @($rbacFindings | Where-Object { $_.Severity -eq "LOW" })
+    $infoFindings = @($rbacFindings | Where-Object { $_.Severity -eq "INFO" })
+    
+    if ($criticalFindings.Count -gt 0) {
+        $remediation = "CRITICAL: Remove Owner/User Access Administrator/Privileged Role Administrator roles from root/management group scope.`n" +
+                       "Use PIM for privileged roles and assign at lower scopes where possible."
+        
+        Write-Finding -Severity "CRITICAL" `
+                      -Message "CRITICAL RBAC assignments at root/management group scope" `
+                      -Count $criticalFindings.Count `
+                      -Data $criticalFindings `
+                      -Service "Identity" `
+                      -Remediation $remediation `
+                      -Exclusions $Exclusions `
+                      -SubscriptionId "Multiple" `
+                      -SubscriptionName "Multiple"
+    }
+    
+    if ($highFindings.Count -gt 0) {
+        $remediation = "Review high-privilege roles (Contributor, Key Vault Contributor, Network Contributor) at elevated scopes.`n" +
+                       "Consider moving to resource group scope where appropriate."
+        
+        Write-Finding -Severity "HIGH" `
+                      -Message "HIGH risk RBAC assignments at management group/subscription scope" `
+                      -Count $highFindings.Count `
+                      -Data $highFindings `
+                      -Service "Identity" `
+                      -Remediation $remediation `
+                      -Exclusions $Exclusions `
+                      -SubscriptionId "Multiple" `
+                      -SubscriptionName "Multiple"
+    }
+    
+    if ($mediumFindings.Count -gt 0) {
+        $remediation = "Review role assignments and consider implementing PIM for elevated privileges."
+        
+        Write-Finding -Severity "MEDIUM" `
+                      -Message "MEDIUM risk RBAC assignments at elevated scopes" `
+                      -Count $mediumFindings.Count `
+                      -Data $mediumFindings `
+                      -Service "Identity" `
+                      -Remediation $remediation `
+                      -Exclusions $Exclusions `
+                      -SubscriptionId "Multiple" `
+                      -SubscriptionName "Multiple"
+    }
+    
+    if ($lowFindings.Count -gt 0) {
+        $remediation = "Informational: Reader roles at elevated scopes."
+        
+        Write-Finding -Severity "LOW" `
+                      -Message "Reader roles at elevated scopes" `
+                      -Count $lowFindings.Count `
+                      -Data $lowFindings `
+                      -Service "Identity" `
+                      -Remediation $remediation `
+                      -Exclusions $Exclusions `
+                      -SubscriptionId "Multiple" `
+                      -SubscriptionName "Multiple"
+    }
+
+    # INFO bucket (e.g. Reader at subscription scope per RBACSeverity map) must be
+    # emitted too - otherwise those assignments are collected but silently dropped.
+    if ($infoFindings.Count -gt 0) {
+        $remediation = "Informational: Reader assignments at subscription scope. Review for least privilege."
+        
+        Write-Finding -Severity "INFO" `
+                      -Message "Reader roles at subscription scope" `
+                      -Count $infoFindings.Count `
+                      -Data $infoFindings `
+                      -Service "Identity" `
+                      -Remediation $remediation `
+                      -Exclusions $Exclusions `
+                      -SubscriptionId "Multiple" `
+                      -SubscriptionName "Multiple"
+    }
+}
+
+function Test-CustomRoles {
+    param(
+        [array]$Subscriptions,
+        [hashtable]$Exclusions,
+        [int]$ProgressId = 0
+    )
+    
+    Write-Section -Title "CUSTOM RBAC ROLES - DANGEROUS PERMISSIONS" -Color "Yellow" -ProgressId $ProgressId
+    
+    $dangerousPatterns = @(
+        "Microsoft.Authorization/*",
+        "Microsoft.ManagedIdentity/*",
+        "Microsoft.KeyVault/vaults/secrets/*",
+        "Microsoft.Compute/virtualMachines/runCommand/*",
+        "*"
+    )
+    
+    $findings = New-Object System.Collections.Generic.List[object]
+    $rolesUnavailable = New-Object System.Collections.Generic.List[object]
+    $totalProcessed = 0
+
+    foreach ($sub in $Subscriptions) {
+        $totalProcessed++
+        if (-not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+            continue
+        }
+        
+        Write-Progress -Activity "Checking custom roles" `
+                      -Status "Subscription: $($sub.Name)" `
+                      -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
+                      -Id $ProgressId
+        
+        try {
+            # -ErrorAction SilentlyContinue (not Stop) + -WarningAction SilentlyContinue so that
+            # Microsoft Graph principal-enrichment failures under Azure-only (-SkipEntra) do not
+            # get promoted to terminating errors and re-logged per subscription (Graph auth spam).
+            $customRoles = Invoke-AzureCommand -Command {
+                Get-AzRoleDefinition -Custom -ErrorAction SilentlyContinue -WarningAction SilentlyContinue | Where-Object { $_.IsCustom -eq $true }
+            } -CommandName "Get-CustomRoles"
+
+            # Perf phase: reuse the cached subscription-scope RBAC read (shared with
+            # IDENTITY-002/003/006) instead of one server-filtered Get-AzRoleAssignment
+            # call per dangerous custom role. The cached list covers the subscription
+            # scope and below, so a client-side RoleDefinitionId filter is equivalent.
+            $subAssignments = @(Get-SubscriptionRBACAssignments -SubscriptionId $sub.Id -SubscriptionName $sub.Name)
+
+            # Phase B2: retain slim projections of the already-fetched custom role
+            # definitions (Actions/DataActions included) so the capability model can
+            # reason about what custom roles grant (e.g. storage key-retrieval
+            # permission) without any additional API calls. In-memory only.
+            if ($null -ne $customRoles) {
+                $roleProjections = [System.Collections.Generic.List[object]]::new()
+                foreach ($role in @($customRoles)) {
+                    $roleProjections.Add([PSCustomObject]@{
+                        RoleGuid    = ("$($role.Id)" -split '/')[-1]
+                        RoleName    = "$($role.Name)"
+                        Actions     = @($role.Actions)
+                        DataActions = @($role.DataActions)
+                    })
+                }
+                $script:State.Cache.RoleDefinitions["$($sub.Id)"] = $roleProjections
+            }
+
+            foreach ($role in $customRoles) {
+                $dangerousActions = @()
+                foreach ($action in $role.Actions) {
+                    foreach ($pattern in $dangerousPatterns) {
+                        if ($action -like $pattern) {
+                            $dangerousActions += $action
+                            break
+                        }
+                    }
+                }
+                
+                if ($role.DataActions) {
+                    foreach ($dataAction in $role.DataActions) {
+                        foreach ($pattern in $dangerousPatterns) {
+                            if ($dataAction -like $pattern) {
+                                $dangerousActions += "[DataAction] $dataAction"
+                                break
+                            }
+                        }
+                    }
+                }
+                
+                if ($dangerousActions.Count -gt 0) {
+                    # RoleDefinitionId may be a bare GUID or a full resource id;
+                    # compare on the GUID segment only.
+                    $roleGuid = ("$($role.Id)" -split '/')[-1]
+                    $assignmentsCount = @($subAssignments | Where-Object {
+                        ("$($_.RoleDefinitionId)" -split '/')[-1] -eq $roleGuid
+                    }).Count
+                    
+                    $findings.Add([PSCustomObject]@{
+                        SubscriptionId = $sub.Id
+                        SubscriptionName = $sub.Name
+                        RoleName = $role.Name
+                        RoleId = $role.Id
+                        DangerousActions = ($dangerousActions -join "; ")
+                        AssignmentsCount = $assignmentsCount
+                    })
+                }
+            }
+        }
+        catch {
+            # A thrown error here means custom-role definitions could not be read for this
+            # subscription (typically a Graph/Authentication error under Azure-only). Record
+            # it so the check emits NotEvaluated for that subscription instead of a false PASS.
+            $errClass = 'Unknown'
+            try { $errClass = (Get-ErrorClass -ErrorRecord $_).Class } catch { }
+            $rolesUnavailable.Add([PSCustomObject]@{ SubscriptionName = $sub.Name })
+            Write-AuditLog -Message "Custom roles could not be evaluated for subscription $($sub.Name) [$errClass]; marked NotEvaluated." -Level WARN
+        }
+    }
+
+    if ($rolesUnavailable.Count -gt 0) {
+        Write-Finding -Severity "INFO" `
+                      -Message "Custom roles could not be evaluated for one or more subscriptions (role definitions unreadable under current authentication)" `
+                      -Count $rolesUnavailable.Count `
+                      -Data $rolesUnavailable `
+                      -Service "Identity" `
+                      -Status "NOTEVALUATED" `
+                      -Remediation "Re-run with Azure + Entra (Graph) authentication, or ensure Microsoft.Authorization/roleDefinitions/read is granted, to evaluate custom roles." `
+                      -Exclusions $Exclusions `
+                      -SubscriptionId "Multiple" `
+                      -SubscriptionName "Multiple"
+    }
+
+    if ($findings.Count -gt 0) {
+        Write-Finding -Severity "HIGH" `
+                      -Message "Custom roles with dangerous/wildcard permissions" `
+                      -Count $findings.Count `
+                      -Data $findings `
+                      -Service "Identity" `
+                      -Remediation "Review and restrict custom role permissions; avoid wildcard actions." `
+                      -Exclusions $Exclusions `
+                      -SubscriptionId "Multiple" `
+                      -SubscriptionName "Multiple"
+    }
+    elseif ($rolesUnavailable.Count -eq 0) {
+        # Explicit PASS record: role definitions were readable and no custom
+        # role carried dangerous permissions. Silence is never proof.
+        Write-Finding -Severity "INFO" `
+                      -Message "No custom roles with dangerous/wildcard permissions found" `
+                      -Count 0 `
+                      -Service "Identity" `
+                      -Status "PASS" `
+                      -Exclusions $Exclusions `
+                      -SubscriptionId "Multiple" `
+                      -SubscriptionName "Multiple"
+    }
+}
+
+function Test-IdentityResourceMapping {
+    param(
+        [array]$Subscriptions,
+        [hashtable]$Exclusions,
+        [int]$ProgressId = 0
+    )
+    
+    Write-Section -Title "P1 - IDENTITY-RESOURCE LINKAGE ANALYSIS" -Color "Red" -ProgressId $ProgressId
+
+    $criticalFindings = New-Object System.Collections.Generic.List[object]
+    $highFindings = New-Object System.Collections.Generic.List[object]
+    # B1 coverage tracking: per-subscription and per-resource-type failures are
+    # recorded so the check can never end as a false clean PASS after errors.
+    $subsEvaluated = New-Object System.Collections.Generic.List[string]
+    $subsSkipped   = New-Object System.Collections.Generic.List[string]
+    $failures      = New-Object System.Collections.Generic.List[object]
+    $totalProcessed = 0
+    $discovered = 0
+    $evaluated  = 0
+
+    foreach ($sub in $Subscriptions) {
+        $totalProcessed++
+        Write-Progress -Activity "Checking managed identity risk mapping" `
+                      -Status "Subscription: $($sub.Name)" `
+                      -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
+                      -Id $ProgressId
+
+        # Each resource type is collected independently: one failing type degrades
+        # coverage to Partial for that subscription instead of sinking all evidence.
+        # Perf phase: lists come from the shared per-run inventory cache; role
+        # assignments come from the cached subscription-scope RBAC read (shared
+        # with IDENTITY-002/003/005) instead of one Get-AzRoleAssignment -ObjectId
+        # call PER identity-bearing resource. The per-resource -ObjectId calls
+        # were the run's worst denied-call pattern: each one burned 40-78s in
+        # Graph principal-resolution latency under Azure-only auth. A sub-scope
+        # -Scope read returns assignments at and below the subscription, so
+        # filtering client-side by principal ObjectId is equivalent.
+        $resourceSets = @(
+            @{ Name = 'App Service';  Kind = 'WebApps';
+               BadRoles = @("Owner", "Contributor", "User Access Administrator") },
+            @{ Name = 'Virtual Machine'; Kind = 'VirtualMachines';
+               BadRoles = @("Owner", "Contributor", "Virtual Machine Contributor") },
+            # Managed-identity mapping only needs $func.Identity.PrincipalId, which
+            # Get-AzFunctionApp returns without any app-settings/secret access.
+            @{ Name = 'Function App'; Kind = 'FunctionApps';
+               BadRoles = @("Owner", "Contributor") }
+        )
+
+        $rbacFetched     = $false
+        $rbacAssignments = @()
+        $rbacDenied      = $false
+
+        foreach ($set in $resourceSets) {
+            $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind $set.Kind
+            if ($inv.Unavailable) {
+                if ($inv.UnavailableReason -eq 'ContextSwitch') {
+                    # Old ctx-fail semantics: whole subscription skipped.
+                    if (-not $subsSkipped.Contains($sub.Name)) { $subsSkipped.Add($sub.Name) }
+                    break
+                }
+                $failures.Add([PSCustomObject]@{
+                    SubscriptionName = $sub.Name
+                    ResourceType     = $set.Name
+                    Reason           = 'Collection failed (inventory fetch failed; detail in audit log)'
+                })
+                continue
+            }
+            if (-not $subsEvaluated.Contains($sub.Name)) { $subsEvaluated.Add($sub.Name) }
+
+            foreach ($res in @($inv.Items)) {
+                $discovered++
+                if (-not ($res.Identity -and $res.Identity.PrincipalId)) { $evaluated++; continue }
+
+                # Lazy, once-per-subscription RBAC read (cached across checks).
+                if (-not $rbacFetched) {
+                    $rbacFetched = $true
+                    $rbacAssignments = @(Get-SubscriptionRBACAssignments -SubscriptionId $sub.Id -SubscriptionName $sub.Name)
+                    $rbacDenied = ($script:State.Cache.ContainsKey('RBACUnavailable') -and
+                                   $script:State.Cache.RBACUnavailable.ContainsKey($sub.Id) -and
+                                   $script:State.Cache.RBACUnavailable[$sub.Id])
+                }
+                if ($rbacDenied) {
+                    # Denied-call guard: classify once per subscription instead of
+                    # failing (and stalling) once per resource.
+                    $failures.Add([PSCustomObject]@{
+                        SubscriptionName = $sub.Name
+                        ResourceType     = $set.Name
+                        ResourceName     = "$($res.Name)"
+                        Reason           = 'Authentication - RBAC assignments unreadable under current auth (subscription-level read denied)'
+                    })
+                    continue
+                }
+
+                $principalId = "$($res.Identity.PrincipalId)"
+                $assignments = @($rbacAssignments | Where-Object { "$($_.ObjectId)" -eq $principalId })
+                $evaluated++
+
+                foreach ($assignment in @($assignments)) {
+                    $roleName = "$($assignment.RoleDefinitionName)"
+                    $isDataPlane = ($set.Name -eq 'Function App') -and
+                        ($roleName -like "*Storage Blob Data*" -or $roleName -like "*Key Vault*")
+                    if ($roleName -in $set.BadRoles) {
+                        $criticalFindings.Add([PSCustomObject]@{
+                            SubscriptionId = $sub.Id; SubscriptionName = $sub.Name
+                            ResourceType = $set.Name; ResourceName = $res.Name
+                            ResourceGroup = $res.ResourceGroupName
+                            Role = $roleName; Scope = $assignment.Scope
+                        })
+                    } elseif ($isDataPlane) {
+                        $highFindings.Add([PSCustomObject]@{
+                            SubscriptionId = $sub.Id; SubscriptionName = $sub.Name
+                            ResourceType = $set.Name; ResourceName = $res.Name
+                            ResourceGroup = $res.ResourceGroupName
+                            Role = $roleName; Scope = $assignment.Scope
+                        })
+                    }
+                }
+            }
+        }
+    }
+
+    # ---- B1 explicit status + coverage ----
+    $riskyTotal  = $criticalFindings.Count + $highFindings.Count
+    $failedCount = $failures.Count + $subsSkipped.Count
+    $complete    = ($failedCount -eq 0)
+    $partial     = (-not $complete)
+
+    if ($evaluated -eq 0 -and $failedCount -gt 0) {
+        $status = 'NOTEVALUATED'
+        $summary = "Could not evaluate identity-resource mapping; collection failed or permission/API unavailable."
+    }
+    elseif ($riskyTotal -gt 0) {
+        $status  = 'FAIL'
+        $summary = "$riskyTotal risky identity-resource assignment(s) across $evaluated evaluated resources" + `
+                   $(if ($complete) { '; coverage complete.' } else { "; $failedCount collection(s) skipped/failed - findings may be incomplete." })
+    }
+    elseif ($partial) {
+        $status  = 'PARTIAL'
+        $summary = "$evaluated of $discovered identity-bearing resources evaluated; 0 risky; $failedCount collection(s) skipped/failed - findings may be incomplete."
+    }
+    elseif ($discovered -eq 0) {
+        $status  = 'PASS'
+        $summary = "No web apps, VMs, or function apps discovered in evaluated scope."
+    }
+    else {
+        $status  = 'PASS'
+        $summary = "$evaluated identity-bearing resources evaluated; 0 risky; coverage complete."
+    }
+
+    $coverageParams = @{
+        DiscoveredResourceCount  = $discovered
+        EvaluatedResourceCount   = $evaluated
+        SkippedResourceCount     = $failures.Count
+        FailedCollectionCount    = $failedCount
+        SubscriptionsEvaluated   = @($subsEvaluated)
+        SubscriptionsSkipped     = @($subsSkipped)
+        CollectionStatus         = if ($complete) { 'Complete' } elseif ($evaluated -gt 0) { 'Partial' } else { 'Failed' }
+        CompleteEvaluation       = $complete
+        PartialEvaluation        = $partial
+        CoverageSummary          = $summary
+        SummaryText              = $summary
+        Confidence               = if ($status -eq 'NOTEVALUATED') { 'Low' } elseif ($partial) { 'Medium' } else { 'High' }
+        ManualValidationRequired = ($status -in @('PARTIAL','NOTEVALUATED'))
+        ApiSources               = @('ARM Get-AzWebApp', 'ARM Get-AzVM', 'ARM Get-AzFunctionApp', 'ARM Get-AzRoleAssignment (role names only)')
+        FindingType              = 'ExcessivePermissions'
+    }
+
+    if ($criticalFindings.Count -gt 0) {
+        Write-Finding -Severity "CRITICAL" -Status 'FAIL' -CheckId "IDENTITY-006" `
+                      -Message "Resources with Managed Identities having Owner/Contributor RBAC (cloud takeover risk)" `
+                      -Count $criticalFindings.Count -Data $criticalFindings -Service "Identity" `
+                      -Remediation "Reduce MI role assignments to least privilege and scope appropriately." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" `
+                      @coverageParams
+    }
+
+    if ($highFindings.Count -gt 0) {
+        Write-Finding -Severity "HIGH" -Status 'FAIL' -CheckId "IDENTITY-006" `
+                      -Message "Resources with Managed Identities having data plane access" `
+                      -Count $highFindings.Count -Data $highFindings -Service "Identity" `
+                      -Remediation "Review data plane access and scope to required resources only." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" `
+                      @coverageParams
+    }
+
+    if ($riskyTotal -eq 0) {
+        # Explicit coverage record: PASS only with proven coverage; PARTIAL /
+        # NOTEVALUATED otherwise. Zero-risky records are INFO - nothing to remediate.
+        $evidence = if ($failures.Count -gt 0) { $failures } else { $null }
+        Write-Finding -Severity "INFO" -Status $status -CheckId "IDENTITY-006" `
+                      -Message "Resources with Managed Identities having high-privilege RBAC" `
+                      -Count 0 -Data $evidence -Service "Identity" `
+                      -Remediation "No action required." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" `
+                      @coverageParams
+    }
+
+    # When risky findings exist AND some collections failed, keep the failure detail
+    # visible as a separate NotEvaluated record so coverage loss is not hidden by FAIL.
+    if ($riskyTotal -gt 0 -and $failedCount -gt 0) {
+        Write-Finding -Severity "INFO" -Status 'NOTEVALUATED' -CheckId "IDENTITY-006" `
+                      -Message "Identity-resource mapping could not be fully evaluated (one or more collections failed); not reported as clean" `
+                      -Count $failedCount -Data $failures -Service "Identity" `
+                      -Remediation "Re-run with an identity that can read web apps, VMs, function apps, and role assignments in all in-scope subscriptions." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple"
+    }
+}
+
+function Register-AzureIdentityChecks {
+    Register-AuditCheck -CheckId "IDENTITY-003" `
+                        -Category "Azure" `
+                        -Service "Identity" `
+                        -Name "Excessive RBAC Privileges" `
+                        -Function ${function:Test-ExcessiveRBAC} `
+                        -DefaultSeverity "MEDIUM" `
+                        -RequiredModules @("Az.Accounts", "Az.Resources") `
+                        -Phase "PerSubscription" `
+                        -AlwaysRun $true
+    
+    Register-AuditCheck -CheckId "IDENTITY-005" `
+                        -Category "Azure" `
+                        -Service "Identity" `
+                        -Name "Custom Roles with Dangerous Permissions" `
+                        -Function ${function:Test-CustomRoles} `
+                        -DefaultSeverity "HIGH" `
+                        -RequiredModules @("Az.Accounts", "Az.Resources") `
+                        -Phase "PerSubscription" `
+                        -AlwaysRun $true
+    
+    Register-AuditCheck -CheckId "IDENTITY-006" `
+                        -Category "Azure" `
+                        -Service "Identity" `
+                        -Name "Identity-Resource Mapping" `
+                        -Function ${function:Test-IdentityResourceMapping} `
+                        -DefaultSeverity "CRITICAL" `
+                        -RequiredModules @("Az.Accounts", "Az.Resources", "Az.Websites") `
+                        -Phase "PerSubscription" `
+                        -RequiredResourceTypes @('Microsoft.Web/sites','Microsoft.Compute/virtualMachines')
+}

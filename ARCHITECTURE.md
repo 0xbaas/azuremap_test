@@ -2,45 +2,90 @@
 
 ## Product split
 
-Two entrypoints share one core:
+Two products share one core; the repository is split into product and shared
+trees:
 
-- `azuremap.ps1` — AzureMap, the Azure (ARM control-plane) product. Loads the
-  shared core + `Core/Azure/` + `Checks/Azure/` + `Export/`. Never loads Graph
-  code and never acquires a Microsoft Graph token. Deprecated switches:
+```
+azuremap.ps1 / entramap.ps1      # root compatibility wrappers (param pass-through)
+Products/
+  AzureMap/                      # real azuremap.ps1 entrypoint
+    Core/       ResourceGraph, Footprint, InventoryCache, Rbac, Preflight.Azure
+    Capability/ CapabilityModel.Azure
+    Checks/     ARM check modules (36 checks)
+    Docs/       AzureMap.md
+  EntraMap/                      # real entramap.ps1 entrypoint
+    Core/       Graph, Collection, TenantWide, Footprint.Entra, Preflight.Entra
+    Capability/ CapabilityModel.Entra
+    Checks/     Entra + tenant-identity check modules
+    Docs/       EntraMap.md
+Shared/
+  Core/         State, Logging, Config, Exclusions, Console, RunStatus,
+                CheckRegistry, Retry, Cache, Redaction, Preflight, Capability
+  Export/       Csv, Json, Html, Summary
+ReferenceData/  privileged-roles.json, permission-escalation-map.json
+Tests/
+  AzureMap/     tests exercising AzureMap product code
+  EntraMap/     tests exercising EntraMap product code
+  Shared/       shared-framework and cross-product composition tests
+  Integration/  offline equivalence checks
+  Fixtures/     canned API/test data
+```
+
+- `azuremap.ps1` (root wrapper → `Products/AzureMap/azuremap.ps1`) — AzureMap,
+  the Azure (ARM control-plane) product. Loads `Shared/Core/` +
+  `Products/AzureMap/{Core,Capability,Checks}` + `Shared/Export/`. Never loads
+  Graph code and never acquires a Microsoft Graph token. Deprecated switches:
   `-SkipEntra` (no-op; Azure-only is the only mode), `-EntraOnly` (prints
   guidance to use `entramap.ps1` and stops).
-- `entramap.ps1` — EntraMap, the Entra ID (Microsoft Graph) product. Loads the
-  shared core + `Core/Entra/` + `Checks/Entra/` + `Export/`. Uses an Az context
-  only as the token vehicle; performs no subscription discovery and no ARM
-  scanning. Runs TenantWide checks only (`Invoke-AuditChecks -Phase TenantWide
-  -Subscriptions @()`).
+- `entramap.ps1` (root wrapper → `Products/EntraMap/entramap.ps1`) — EntraMap,
+  the Entra ID (Microsoft Graph) product. Loads `Shared/Core/` +
+  `Products/EntraMap/{Core,Capability,Checks}` + `Shared/Export/`. Uses an Az
+  context only as the token vehicle; performs no subscription discovery and no
+  ARM scanning. Runs TenantWide checks only (`Invoke-AuditChecks -Phase
+  TenantWide -Subscriptions @()`). Flow: preflight → Assessment scope block →
+  check registration → tenant discovery (`Build-EntraFootprint`) → assessment
+  plan (with Graph permission-limited count) → collection → checks → Entra
+  capability model → summary/exports.
 
 Run modes: Azure-only (AzureMap), Graph-only (EntraMap). A combined run
 loading both product cores in one session is a possible future mode, not a
 current entrypoint.
 
-Shared core contract (`Core/`): Logging, Console, State (base
+Shared core contract (`Shared/Core/`): Logging, Console, State (base
 `Initialize-AuditState` + per-product wrappers layering product slots onto an
 optional existing state), RunStatus, CheckRegistry, Retry, Cache, Config,
-Exclusions, Redaction, Capability primitives (`Core/Capability.ps1`), and the
-`Export/` modules.
+Exclusions, Redaction, Capability primitives (`Shared/Shared/Core/Capability.ps1`),
+and the `Shared/Export/` modules. `ReferenceData/` stays at the repo root;
+both JSON files are currently consumed only by EntraMap collection
+(`Products/EntraMap/Checks/Collect.ps1`).
 
 Product cores:
 
-- `Core/Azure/`: ResourceGraph, Footprint, InventoryCache, Rbac,
-  CapabilityModel.Azure, Preflight.Azure (`Test-AzureAuthPreflight`,
-  `Test-AzureSubscriptionScope`).
-- `Core/Entra/`: Graph (`Get-GraphToken`, `Invoke-GraphCommand/Batch`, all
-  GET-only), Collection (`Invoke-AzureMapCollection`), TenantWide
-  (`Get-TenantWideData`), Preflight.Entra (`Test-EntraAuthPreflight`).
+- `Products/AzureMap/Core/`: ResourceGraph, Footprint, InventoryCache, Rbac,
+  Preflight.Azure (`Test-AzureAuthPreflight`, `Test-AzureSubscriptionScope`);
+  `Products/AzureMap/Capability/`: CapabilityModel.Azure.
+- `Products/EntraMap/Core/`: Graph (`Get-GraphToken`, `Get-GraphTokenScopeInfo`,
+  `Invoke-GraphCommand/Batch`, all GET-only), Collection
+  (`Invoke-AzureMapCollection`), TenantWide (`Get-TenantWideData`),
+  Footprint.Entra (`Build-EntraFootprint`, `Show-EntraFootprint`,
+  `Show-EntraAssessmentScope`), Preflight.Entra (`Test-EntraAuthPreflight`);
+  `Products/EntraMap/Capability/`: CapabilityModel.Entra
+  (`Build-EntraCapabilityModel`).
+
+Both products are discovery-first: AzureMap runs Get-EnvironmentFootprint
+after subscription discovery and before checks; EntraMap runs
+Build-EntraFootprint (tenant discovery) after check registration and before
+the assessment plan/collection, so the operator sees the environment shape
+and any permission-limited surface up front.
 
 Check layout:
 
-- `Checks/Azure/` — 36 ARM checks (incl. per-subscription IDENTITY-003/005/006),
-  registered via `Register-Azure*Checks`.
-- `Checks/Entra/` — ENTRA-01..12 plus the relocated tenant-wide identity checks
-  IDENTITY-001/002/004 (`TenantIdentity.ps1`; CheckIds and logic unchanged),
-  registered as hashtable definitions returned by `Register-Entra*Checks`.
+- `Products/AzureMap/Checks/` — 36 ARM checks (incl. per-subscription
+  IDENTITY-003/005/006), registered via `Register-Azure*Checks`.
+- `Products/EntraMap/Checks/` — ENTRA-01..12 plus the relocated tenant-wide
+  identity checks IDENTITY-001/002/004 (`TenantIdentity.ps1`; CheckIds and
+  logic unchanged), registered as hashtable definitions returned by
+  `Register-Entra*Checks`.
 
 Core concepts:
 
@@ -51,13 +96,13 @@ Core concepts:
 
 Important files:
 
-- Core/CheckRegistry.ps1
-- Core/RunStatus.ps1
-- Core/Console.ps1
-- Core/Entra/Collection.ps1
-- Export/Json.ps1
-- Export/Csv.ps1
-- Export/Html.ps1
+- Shared/Core/CheckRegistry.ps1
+- Shared/Shared/Core/RunStatus.ps1
+- Shared/Shared/Core/Console.ps1
+- Products/EntraMap/Core/Collection.ps1
+- Shared/Export/Json.ps1
+- Shared/Export/Csv.ps1
+- Shared/Export/Html.ps1
 
 
 
@@ -67,7 +112,7 @@ Coverage and Status are not yet strongly linked.
 
 ## Perf phase: inventory cache, proven-empty gating, timing
 
-Per-run inventory cache (Core/Azure/InventoryCache.ps1):
+Per-run inventory cache (Products/AzureMap/Core/InventoryCache.ps1):
 
 - Get-SubscriptionInventory -Kind <Kind> returns @{ Items; ProvenEmpty;
   Unavailable; UnavailableReason ('ContextSwitch'|'Fetch'); FromCache } for a
@@ -95,7 +140,7 @@ Per-run inventory cache (Core/Azure/InventoryCache.ps1):
   (Get-SubscriptionRBACAssignments) with client-side ObjectId/RoleDefinitionId
   filters instead of per-resource/per-role Get-AzRoleAssignment calls.
 
-Timing (State.Timing, Get-PerformanceSummary in Core/Logging.ps1):
+Timing (State.Timing, Get-PerformanceSummary in Shared/Core/Logging.ps1):
 
 - Per-check DurationSeconds on execution records (Complete-CheckExecutionRecord).
 - Phase totals (Discovery/Collection/Assessment/Export) and per-subscription
@@ -108,19 +153,30 @@ Timing (State.Timing, Get-PerformanceSummary in Core/Logging.ps1):
 
 ## Phase B2: capability / attack-path modeling (read-only)
 
-Core/Azure/CapabilityModel.Azure.ps1 (builders over the shared primitives in
-Core/Capability.ps1) builds a capability graph + grouped insights AFTER
-assessment (azuremap.ps1 step 8.5, timed as the CapabilityModel phase) from
-already-collected data only: finding evidence (State.Results), the inventory
-cache (State.Cache.ResourceLists), the RBAC cache (State.Cache.RBACAssignments)
-and the footprint. It performs NO Azure/Graph API calls, never retrieves
-keys/secrets/SAS/tokens/content and never executes write actions (enforced by
-source-grep tests).
+Capability modeling is per-product, built on the shared primitives in
+Shared/Core/Capability.ps1 (model version, output caps, context, node/edge/insight
+constructors with dedupe + truncation, evidence readers). Each entrypoint
+runs its own builder after assessment (step 8.5, timed as the CapabilityModel
+phase): azuremap.ps1 calls Build-CapabilityModel
+(Products/AzureMap/Capability/CapabilityModel.Azure.ps1), entramap.ps1 calls
+Build-EntraCapabilityModel (Products/EntraMap/Capability/CapabilityModel.Entra.ps1). Both build
+from already-collected data only and perform NO Azure/Graph API calls, never
+retrieve keys/secrets/SAS/tokens/content and never execute write actions
+(enforced by source-grep tests; the Entra model is additionally pinned by a
+runtime test with all Graph/Azure entry points stubbed to throw).
+
+Azure builders read finding evidence (State.Results), the inventory cache
+(State.Cache.ResourceLists), the RBAC cache (State.Cache.RBACAssignments) and
+the footprint. Entra builders read finding evidence (State.Results), the
+Entra collection (State.Entra, e.g. PrincipalCache for guest classification),
+tenant-wide data and the tenant footprint (State.EntraFootprint).
 
 - Model: Nodes (Id/Type/Name/Scope/ResourceType/Sensitivity/Exposure), Edges
   (From/To/Type/Capability/SourceCheckIds/Confidence/Severity/Reason, deduped
   on From|To|Capability), Insights (grouped, severity-sorted, ids CAP-001..).
-- 7 builders: storage key capability (Shared Key + key-retrieval RBAC -
+  Both products emit the same model shape so the shared renderers work
+  unchanged.
+- 7 Azure builders: storage key capability (Shared Key + key-retrieval RBAC -
   well-known role names OR custom roles whose cached definition Actions grant
   the key-list action, matched statically via Test-CapabilityKeyListCapableActions;
   modeled only, never invoked), public storage exposure combination, public
@@ -128,13 +184,21 @@ source-grep tests).
   exposure combination, network exfiltration paths, monitoring gaps on exposed
   critical resources. Custom role definitions fetched by IDENTITY-005 are
   retained in State.Cache.RoleDefinitions (in-memory only) for this matching.
+- 10 Entra builders: permanent privileged role assignments (Critical role + no
+  PIM eligible + no admin-MFA policy combination), PIM without strong
+  activation controls, high-privilege Graph app permissions, dangerous
+  permissions + weak ownership, long-lived app credentials (metadata only),
+  role-assignable groups, guest/external privileged access, break-glass/GA
+  hygiene, workload identity federation into privileged apps, Conditional
+  Access coverage gaps.
 - Severity discipline: CRITICAL only for combined confirmed high-impact
   paths; single-condition evidence never escalates. Confidence: High =
   directly confirmed by collected metadata, Medium = inferred from
-  role/scope combination.
+  role/scope combination (Entra adds Low for heuristic-only findings that
+  need manual validation).
 - Caps: 100 insights / 500 nodes / 1000 edges / 50 impacted resources per
   insight (full count preserved). Truncation counters in Limits.
-- Output: CLI shows top 5 insights only (Core/Console.ps1); HTML gains a
+- Output: CLI shows top 5 insights only (Shared/Core/Console.ps1); HTML gains a
   Capability Insights section (insight cards + capped graph table); JSON
   gains a top-level CapabilityModel block. CSV unchanged.
 
@@ -157,7 +221,7 @@ false Pass. JSON Metadata.DataPlaneIncluded records the mode.
 
 ## Phase B1: Status x Coverage contract
 
-Canonical check statuses (Core/RunStatus.ps1):
+Canonical check statuses (Shared/Core/RunStatus.ps1):
 
 \- PASS, FAIL, PARTIAL, WARNING, NOTEVALUATED, ERROR.
 
@@ -208,7 +272,7 @@ Exports and console must preserve explicit Status and Coverage;
 
 Reference implementation:
 
-\- Checks/Azure/Storage.ps1 (New-StorageCoverage / New-StorageCoverageParams
+\- Products/AzureMap/Checks/Storage.ps1 (New-StorageCoverage / New-StorageCoverageParams
   helpers; all five STORAGE checks emit explicit status + coverage).
 
 
@@ -230,7 +294,7 @@ Applicability:
   (CoverageStatus = Complete, Confidence = High). Partial or low-confidence
   footprints disable applicability gating entirely (checks run).
 
-Environment footprint (Core/Azure/Footprint.ps1):
+Environment footprint (Products/AzureMap/Core/Footprint.ps1):
 
 \- Get-EnvironmentFootprint runs after subscription discovery, before checks.
   Read-only: Azure Resource Graph preferred, Get-AzResource per subscription as
@@ -246,7 +310,7 @@ Environment footprint (Core/Azure/Footprint.ps1):
 
 Scope guard:
 
-\- Test-AzureSubscriptionScope (Core/Azure/Preflight.Azure.ps1): when neither
+\- Test-AzureSubscriptionScope (Products/AzureMap/Core/Preflight.Azure.ps1): when neither
   Get-AzSubscription nor the current Az context yields a usable subscription,
   azuremap.ps1 stops before collection/checks
   with an actionable message instead of emitting an empty report.

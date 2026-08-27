@@ -5,11 +5,11 @@ All gates must pass before merge. Tick each box when verified.
 ---
 
 ## Gate 0: Repository Structure
-- [x] Folder layout matches spec (`Core/`, `Checks/Azure/`, `Checks/Entra/`, `Export/`, `Tests/`, `ReferenceData/`)
+- [x] Folder layout matches spec (`Products/AzureMap/`, `Products/EntraMap/`, `Shared/Core/`, `Shared/Export/`, `Tests/`, `ReferenceData/`)
 - [x] `azuremap.ps1` and `entramap.ps1` entrypoints exist and dot-source their product modules
-- [x] `Core/State.ps1` initializes `$script:State` with all required sub-structures
-- [x] `Core/Logging.ps1`, `Core/Config.ps1`, `Core/Exclusions.ps1` present
-- [x] `Export/` modules for CSV, JSON, HTML exist
+- [x] `Shared/Core/State.ps1` initializes `$script:State` with all required sub-structures
+- [x] `Shared/Core/Logging.ps1`, `Shared/Core/Config.ps1`, `Shared/Core/Exclusions.ps1` present
+- [x] `Shared/Export/` modules for CSV, JSON, HTML exist
 
 ## Gate 1: Core Infrastructure
 - [x] `Initialize-AuditState` returns fully populated state hashtable
@@ -31,7 +31,7 @@ All gates must pass before merge. Tick each box when verified.
 - [x] `Show-AuditSummary` prints final statistics
 
 ## Gate 4: Entra Design Compliance
-- [x] `Invoke-EntraCollection` called ONCE, outside subscription loops (via `Invoke-AzureMapCollection` in `Core/Entra/Collection.ps1`, invoked by `entramap.ps1`)
+- [x] `Invoke-EntraCollection` called ONCE, outside subscription loops (via `Invoke-AzureMapCollection` in `Products/EntraMap/Core/Collection.ps1`, invoked by `entramap.ps1`)
 - [x] TenantWide checks do NOT run inside per-subscription loops
 - [x] No Entra check file (except `Collect.ps1`) calls `Invoke-GraphCommand` or `Invoke-GraphBatch`
 - [x] PIM endpoints (`roleEligibilitySchedules`, `roleAssignmentSchedules`) use beta API version
@@ -44,12 +44,12 @@ All gates must pass before merge. Tick each box when verified.
   - Beta-gated: `Test-EntraPIMEligibleAssignments` (HIGH)
 
 ## Gate 5: BlackCat-Inspired Improvements
-- [x] **Multi-layer cache** (`Core/Cache.ps1`): Graph, AzBatch, General tiers with TTL, LRU eviction, GZip compression (>1KB)
+- [x] **Multi-layer cache** (`Shared/Core/Cache.ps1`): Graph, AzBatch, General tiers with TTL, LRU eviction, GZip compression (>1KB)
 - [x] **Cacheable-operation wrapper** (`Invoke-CacheableOperation`): cache-check → execute → store pattern
-- [x] **Resource Graph batching** (`Core/Azure/ResourceGraph.ps1`): `Invoke-ResourceGraphQuery` with `$skipToken` pagination + `Search-AzGraph` fallback
+- [x] **Resource Graph batching** (`Products/AzureMap/Core/ResourceGraph.ps1`): `Invoke-ResourceGraphQuery` with `$skipToken` pagination + `Search-AzGraph` fallback
 - [x] **Permission risk mapping** (`ReferenceData/`): `privileged-roles.json` (20 roles), `permission-escalation-map.json` (24 dangerous perms)
 - [ ] **Parallel per-subscription processing**: Declared (`-Parallel` switch) but NOT YET IMPLEMENTED — known gap
-- [x] **Config knobs** (`Core/State.ps1`): `MaxRetryAttempts`, `RetryDelaySeconds`, `MaxRetryDelaySeconds`, `BatchSize`, `PageSize` + `$script:MaxCacheSize` in Cache.ps1
+- [x] **Config knobs** (`Shared/Core/State.ps1`): `MaxRetryAttempts`, `RetryDelaySeconds`, `MaxRetryDelaySeconds`, `BatchSize`, `PageSize` + `$script:MaxCacheSize` in Cache.ps1
 
 ## Gate 6: Tests & Static Analysis
 - [x] Pester tests pass: 38/38 (CheckRegistry, Config, Retry)

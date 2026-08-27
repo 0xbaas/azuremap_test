@@ -1,0 +1,22 @@
+{
+  "value": [
+    {
+      "id": "bbbb0002-0000-4000-8000-000000000001",
+      "displayName": "sg-privileged-access",
+      "isAssignableToRole": true,
+      "securityEnabled": true,
+      "mailEnabled": false,
+      "groupTypes": [],
+      "memberCount": 3
+    },
+    {
+      "id": "bbbb0002-0000-4000-8000-000000000002",
+      "displayName": "sg-general-users",
+      "isAssignableToRole": false,
+      "securityEnabled": true,
+      "mailEnabled": false,
+      "groupTypes": [],
+      "memberCount": 42
+    }
+  ]
+}

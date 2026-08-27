@@ -1,0 +1,272 @@
+[
+  {
+    "CheckId": "ENTRA-01",
+    "CheckName": "Standing privileged role assignments",
+    "Finding": "3 standing privileged directory role assignment(s) detected",
+    "Count": 3,
+    "Status": "FAIL",
+    "Severity": "HIGH",
+    "Evidence": [
+      {
+        "PrincipalId": "aaaa0001-0000-4000-8000-000000000001",
+        "PrincipalType": "User",
+        "PrincipalDisplayName": "Admin One",
+        "RoleName": "Global Administrator",
+        "RoleCriticality": "Critical",
+        "IsBuiltIn": true,
+        "GroupMemberCount": 0,
+        "Severity": "HIGH"
+      },
+      {
+        "PrincipalId": "aaaa0001-0000-4000-8000-000000000003",
+        "PrincipalType": "User",
+        "PrincipalDisplayName": "Ext Vendor (Contoso)",
+        "RoleName": "Global Administrator",
+        "RoleCriticality": "Critical",
+        "IsBuiltIn": true,
+        "GroupMemberCount": 0,
+        "Severity": "HIGH"
+      },
+      {
+        "PrincipalId": "aaaa0001-0000-4000-8000-000000000002",
+        "PrincipalType": "User",
+        "PrincipalDisplayName": "Admin Two",
+        "RoleName": "Global Administrator",
+        "RoleCriticality": "Critical",
+        "IsBuiltIn": true,
+        "GroupMemberCount": 0,
+        "Severity": "HIGH"
+      }
+    ]
+  },
+  {
+    "CheckId": "ENTRA-02",
+    "CheckName": "PIM standing vs eligible analysis",
+    "Finding": "2 standing-active privileged assignment(s) analyzed for PIM eligibility",
+    "Count": 2,
+    "Status": "FAIL",
+    "Severity": "HIGH",
+    "Evidence": [
+      {
+        "PrincipalId": "aaaa0001-0000-4000-8000-000000000001",
+        "PrincipalName": "Admin One",
+        "PrincipalType": "User",
+        "RoleName": "Global Administrator",
+        "RoleCriticality": "Critical",
+        "AssignmentType": "Standing-Active",
+        "HasPIMEligible": false,
+        "Severity": "HIGH"
+      },
+      {
+        "PrincipalId": "aaaa0001-0000-4000-8000-000000000002",
+        "PrincipalName": "Admin Two",
+        "PrincipalType": "User",
+        "RoleName": "Global Administrator",
+        "RoleCriticality": "Critical",
+        "AssignmentType": "Standing-Active",
+        "HasPIMEligible": true,
+        "Severity": "INFO"
+      }
+    ]
+  },
+  {
+    "CheckId": "ENTRA-03",
+    "CheckName": "Service principals with dangerous Graph permissions",
+    "Finding": "2 service principal(s) with dangerous Graph application permissions",
+    "Count": 2,
+    "Status": "FAIL",
+    "Severity": "CRITICAL",
+    "Evidence": [
+      {
+        "SPId": "dddd0004-0000-4000-8000-000000000001",
+        "DisplayName": "sp-ci-cd",
+        "AppId": "cccc0003-0000-4000-8000-0000000000a1",
+        "AccountEnabled": true,
+        "DangerousPermissions": [ "RoleManagement.ReadWrite.Directory", "AppRoleAssignment.ReadWrite.All" ],
+        "PermissionCount": 2,
+        "HighestSeverity": "CRITICAL",
+        "Severity": "CRITICAL"
+      },
+      {
+        "SPId": "dddd0004-0000-4000-8000-000000000002",
+        "DisplayName": "app-github-federation",
+        "AppId": "cccc0003-0000-4000-8000-0000000000a2",
+        "AccountEnabled": true,
+        "DangerousPermissions": [ "Directory.ReadWrite.All" ],
+        "PermissionCount": 1,
+        "HighestSeverity": "HIGH",
+        "Severity": "HIGH"
+      }
+    ]
+  },
+  {
+    "CheckId": "ENTRA-04",
+    "CheckName": "App/SP ownership risks",
+    "Finding": "2 ownership risk(s) on applications/service principals",
+    "Count": 2,
+    "Status": "FAIL",
+    "Severity": "HIGH",
+    "Evidence": [
+      {
+        "TargetId": "dddd0004-0000-4000-8000-000000000001",
+        "TargetDisplayName": "sp-ci-cd",
+        "TargetType": "ServicePrincipal",
+        "OwnerId": "aaaa0001-0000-4000-8000-000000000005",
+        "OwnerName": "App Owner",
+        "OwnerIsAdmin": false,
+        "DangerousPermissions": "RoleManagement.ReadWrite.Directory, AppRoleAssignment.ReadWrite.All",
+        "RiskType": "NonAdminOwnerOfPrivilegedSP",
+        "Severity": "HIGH"
+      },
+      {
+        "TargetId": "cccc0003-0000-4000-8000-000000000003",
+        "TargetDisplayName": "app-weak-api",
+        "TargetType": "Application",
+        "OwnerId": "aaaa0001-0000-4000-8000-000000000005",
+        "OwnerName": "App Owner",
+        "OwnerIsAdmin": false,
+        "DangerousPermissions": "",
+        "RiskType": "ExcessiveOwners",
+        "Severity": "LOW"
+      }
+    ]
+  },
+  {
+    "CheckId": "ENTRA-05",
+    "CheckName": "Role-assignable groups",
+    "Finding": "1 role-assignable group(s) with privileged roles or risky membership",
+    "Count": 1,
+    "Status": "FAIL",
+    "Severity": "HIGH",
+    "Evidence": [
+      {
+        "GroupId": "bbbb0002-0000-4000-8000-000000000001",
+        "GroupName": "sg-privileged-access",
+        "AssignedRoles": [ "Privileged Role Administrator" ],
+        "RoleCount": 1,
+        "MemberCount": 3,
+        "HoldsPrivRole": true,
+        "Severity": "HIGH"
+      }
+    ]
+  },
+  {
+    "CheckId": "ENTRA-07",
+    "CheckName": "Application credential hygiene",
+    "Finding": "3 application credential hygiene issue(s)",
+    "Count": 3,
+    "Status": "FAIL",
+    "Severity": "MEDIUM",
+    "Evidence": [
+      {
+        "AppId": "cccc0003-0000-4000-8000-0000000000a1",
+        "AppName": "app-ci-cd",
+        "CredentialType": "Password",
+        "KeyId": "eeee0005-0000-4000-8000-000000000001",
+        "ExpiryDate": "2099-01-01T00:00:00Z",
+        "DaysUntilExpiry": 26350,
+        "FindingType": "LongLivedCredential",
+        "Severity": "MEDIUM"
+      },
+      {
+        "AppId": "cccc0003-0000-4000-8000-0000000000a3",
+        "AppName": "app-weak-api",
+        "CredentialType": "Certificate",
+        "KeyId": "eeee0005-0000-4000-8000-000000000002",
+        "ExpiryDate": "2026-03-01T00:00:00Z",
+        "DaysUntilExpiry": 185,
+        "FindingType": "MultipleActiveCredentials",
+        "Severity": "LOW"
+      },
+      {
+        "AppId": "cccc0003-0000-4000-8000-0000000000a3",
+        "AppName": "app-weak-api",
+        "CredentialType": "Certificate",
+        "KeyId": "eeee0005-0000-4000-8000-000000000003",
+        "ExpiryDate": "2025-12-01T00:00:00Z",
+        "DaysUntilExpiry": -269,
+        "FindingType": "ExpiredCredential",
+        "Severity": "LOW"
+      }
+    ]
+  },
+  {
+    "CheckId": "ENTRA-09",
+    "CheckName": "Conditional Access coverage",
+    "Finding": "4 Conditional Access coverage gap(s)",
+    "Count": 4,
+    "Status": "FAIL",
+    "Severity": "HIGH",
+    "Evidence": [
+      {
+        "Gap": "No enabled policy requiring MFA for directory (admin) roles",
+        "Risk": "Privileged sign-ins may occur without MFA",
+        "Severity": "HIGH"
+      },
+      {
+        "Gap": "No enabled policy blocking legacy authentication",
+        "Risk": "Legacy clients bypass Conditional Access entirely",
+        "Severity": "MEDIUM"
+      },
+      {
+        "Gap": "No enabled policy requiring MFA for guest/external users",
+        "Risk": "External sign-ins may occur without MFA",
+        "Severity": "MEDIUM"
+      },
+      {
+        "Gap": "Report-only Conditional Access policies present",
+        "Risk": "Policies are not enforced",
+        "Count": 1,
+        "Severity": "LOW"
+      }
+    ]
+  },
+  {
+    "CheckId": "ENTRA-10",
+    "CheckName": "Authentication methods policy",
+    "Finding": "1 weak authentication method(s) enabled",
+    "Count": 1,
+    "Status": "FAIL",
+    "Severity": "MEDIUM",
+    "Evidence": [
+      {
+        "Method": "SMS",
+        "State": "Enabled",
+        "Risk": "Phishable authentication method enabled tenant-wide"
+      }
+    ]
+  },
+  {
+    "CheckId": "ENTRA-11",
+    "CheckName": "Break-glass account posture",
+    "Finding": "1 break-glass / Global Administrator hygiene risk(s)",
+    "Count": 1,
+    "Status": "FAIL",
+    "Severity": "MEDIUM",
+    "Evidence": [
+      {
+        "Risk": "A break-glass Global Administrator account appears disabled",
+        "Count": 1,
+        "Severity": "MEDIUM"
+      }
+    ]
+  },
+  {
+    "CheckId": "ENTRA-12",
+    "CheckName": "Workload identity federation risks",
+    "Finding": "1 risky federated identity credential(s)",
+    "Count": 1,
+    "Status": "FAIL",
+    "Severity": "HIGH",
+    "Evidence": [
+      {
+        "AppDisplayName": "app-github-federation",
+        "AppId": "cccc0003-0000-4000-8000-0000000000a2",
+        "Issuer": "https://token.actions.githubusercontent.com",
+        "Subject": "repo:contoso/app:*",
+        "Risk": "Wildcard subject allows any branch or pull request (broad trust)",
+        "Severity": "HIGH"
+      }
+    ]
+  }
+]
