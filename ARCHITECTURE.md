@@ -1,58 +1,63 @@
-\# AzureMap Architecture
+# AzureMap / EntraMap Architecture
 
+## Product split
 
+Two entrypoints share one core:
 
-Main entrypoint:
+- `azuremap.ps1` — AzureMap, the Azure (ARM control-plane) product. Loads the
+  shared core + `Core/Azure/` + `Checks/Azure/` + `Export/`. Never loads Graph
+  code and never acquires a Microsoft Graph token. Deprecated switches:
+  `-SkipEntra` (no-op; Azure-only is the only mode), `-EntraOnly` (prints
+  guidance to use `entramap.ps1` and stops).
+- `entramap.ps1` — EntraMap, the Entra ID (Microsoft Graph) product. Loads the
+  shared core + `Core/Entra/` + `Checks/Entra/` + `Export/`. Uses an Az context
+  only as the token vehicle; performs no subscription discovery and no ARM
+  scanning. Runs TenantWide checks only (`Invoke-AuditChecks -Phase TenantWide
+  -Subscriptions @()`).
 
-\- azuremap.ps1
+Run modes: Azure-only (AzureMap), Graph-only (EntraMap). A combined run
+loading both product cores in one session is a possible future mode, not a
+current entrypoint.
 
+Shared core contract (`Core/`): Logging, Console, State (base
+`Initialize-AuditState` + per-product wrappers layering product slots onto an
+optional existing state), RunStatus, CheckRegistry, Retry, Cache, Config,
+Exclusions, Redaction, Capability primitives (`Core/Capability.ps1`), and the
+`Export/` modules.
 
+Product cores:
 
-Main folders:
+- `Core/Azure/`: ResourceGraph, Footprint, InventoryCache, Rbac,
+  CapabilityModel.Azure, Preflight.Azure (`Test-AzureAuthPreflight`,
+  `Test-AzureSubscriptionScope`).
+- `Core/Entra/`: Graph (`Get-GraphToken`, `Invoke-GraphCommand/Batch`, all
+  GET-only), Collection (`Invoke-AzureMapCollection`), TenantWide
+  (`Get-TenantWideData`), Preflight.Entra (`Test-EntraAuthPreflight`).
 
-\- Core/
+Check layout:
 
-\- Checks/Azure/
-
-\- Checks/Entra/
-
-\- Export/
-
-\- Tests/Unit/
-
-
+- `Checks/Azure/` — 36 ARM checks (incl. per-subscription IDENTITY-003/005/006),
+  registered via `Register-Azure*Checks`.
+- `Checks/Entra/` — ENTRA-01..12 plus the relocated tenant-wide identity checks
+  IDENTITY-001/002/004 (`TenantIdentity.ps1`; CheckIds and logic unchanged),
+  registered as hashtable definitions returned by `Register-Entra*Checks`.
 
 Core concepts:
 
-\- Checks are registered centrally.
-
-\- Checks run as TenantWide or PerSubscription.
-
-\- Azure-only mode uses -SkipEntra.
-
-\- Graph/Entra checks require Graph collection.
-
-\- Findings are created through Write-Finding / New-AzureMapFinding.
-
-\- Results are exported to JSON, CSV, and HTML.
-
-
+- Checks are registered centrally (State.CheckRegistry).
+- Checks run as TenantWide or PerSubscription.
+- Findings are created through Write-Finding / New-AzureMapFinding.
+- Results are exported to JSON, CSV, and HTML.
 
 Important files:
 
-\- Core/CheckRegistry.ps1
-
-\- Core/RunStatus.ps1
-
-\- Core/Console.ps1
-
-\- Core/Collection.ps1
-
-\- Export/Json.ps1
-
-\- Export/Csv.ps1
-
-\- Export/Html.ps1
+- Core/CheckRegistry.ps1
+- Core/RunStatus.ps1
+- Core/Console.ps1
+- Core/Entra/Collection.ps1
+- Export/Json.ps1
+- Export/Csv.ps1
+- Export/Html.ps1
 
 
 
@@ -62,7 +67,7 @@ Coverage and Status are not yet strongly linked.
 
 ## Perf phase: inventory cache, proven-empty gating, timing
 
-Per-run inventory cache (Core/InventoryCache.ps1):
+Per-run inventory cache (Core/Azure/InventoryCache.ps1):
 
 - Get-SubscriptionInventory -Kind <Kind> returns @{ Items; ProvenEmpty;
   Unavailable; UnavailableReason ('ContextSwitch'|'Fetch'); FromCache } for a
@@ -103,8 +108,9 @@ Timing (State.Timing, Get-PerformanceSummary in Core/Logging.ps1):
 
 ## Phase B2: capability / attack-path modeling (read-only)
 
-Core/CapabilityModel.ps1 builds a capability graph + grouped insights AFTER
-assessment (azuremap.ps1 step 9.5, timed as the CapabilityModel phase) from
+Core/Azure/CapabilityModel.Azure.ps1 (builders over the shared primitives in
+Core/Capability.ps1) builds a capability graph + grouped insights AFTER
+assessment (azuremap.ps1 step 8.5, timed as the CapabilityModel phase) from
 already-collected data only: finding evidence (State.Results), the inventory
 cache (State.Cache.ResourceLists), the RBAC cache (State.Cache.RBACAssignments)
 and the footprint. It performs NO Azure/Graph API calls, never retrieves
@@ -224,7 +230,7 @@ Applicability:
   (CoverageStatus = Complete, Confidence = High). Partial or low-confidence
   footprints disable applicability gating entirely (checks run).
 
-Environment footprint (Core/Footprint.ps1):
+Environment footprint (Core/Azure/Footprint.ps1):
 
 \- Get-EnvironmentFootprint runs after subscription discovery, before checks.
   Read-only: Azure Resource Graph preferred, Get-AzResource per subscription as
@@ -240,9 +246,9 @@ Environment footprint (Core/Footprint.ps1):
 
 Scope guard:
 
-\- Test-AzureSubscriptionScope (Core/Preflight.ps1): when neither
-  Get-AzSubscription nor the current Az context yields a usable subscription
-  (and the run is not Entra-only), azuremap.ps1 stops before collection/checks
+\- Test-AzureSubscriptionScope (Core/Azure/Preflight.Azure.ps1): when neither
+  Get-AzSubscription nor the current Az context yields a usable subscription,
+  azuremap.ps1 stops before collection/checks
   with an actionable message instead of emitting an empty report.
 
 CLI output discipline:
@@ -258,9 +264,10 @@ CLI output discipline:
   display name (CheckDisplayNames); the CheckId is muted secondary metadata
   at the end of the line. Checks execute in domain order within each phase
   so sections print contiguously.
-\- Mode skips are visible: Entra checks under -SkipEntra (and Azure checks
-  under -EntraOnly) are recorded as Skipped with the mode reason instead of
-  vanishing from the run.
+\- Mode skips are visible: each entrypoint registers only its own product's
+  checks, so cross-product checks no longer appear at all; in-product skips
+  (e.g. data-plane checks without -IncludeDataPlane) are recorded as Skipped
+  with the reason instead of vanishing from the run.
 \- Show-AssessmentPlan prints planned/relevant/skipped-by-mode/not-in-scope
   counts before execution.
 \- The log file is the system of record; the console is an operator summary.

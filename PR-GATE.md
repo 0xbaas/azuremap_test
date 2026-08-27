@@ -6,7 +6,7 @@ All gates must pass before merge. Tick each box when verified.
 
 ## Gate 0: Repository Structure
 - [x] Folder layout matches spec (`Core/`, `Checks/Azure/`, `Checks/Entra/`, `Export/`, `Tests/`, `ReferenceData/`)
-- [x] `AzureMap.ps1` entrypoint exists and dot-sources all modules
+- [x] `azuremap.ps1` and `entramap.ps1` entrypoints exist and dot-source their product modules
 - [x] `Core/State.ps1` initializes `$script:State` with all required sub-structures
 - [x] `Core/Logging.ps1`, `Core/Config.ps1`, `Core/Exclusions.ps1` present
 - [x] `Export/` modules for CSV, JSON, HTML exist
@@ -31,7 +31,7 @@ All gates must pass before merge. Tick each box when verified.
 - [x] `Show-AuditSummary` prints final statistics
 
 ## Gate 4: Entra Design Compliance
-- [x] `Invoke-EntraCollection` called ONCE, outside subscription loops (line 165 of `AzureMap.ps1`)
+- [x] `Invoke-EntraCollection` called ONCE, outside subscription loops (via `Invoke-AzureMapCollection` in `Core/Entra/Collection.ps1`, invoked by `entramap.ps1`)
 - [x] TenantWide checks do NOT run inside per-subscription loops
 - [x] No Entra check file (except `Collect.ps1`) calls `Invoke-GraphCommand` or `Invoke-GraphBatch`
 - [x] PIM endpoints (`roleEligibilitySchedules`, `roleAssignmentSchedules`) use beta API version
@@ -46,7 +46,7 @@ All gates must pass before merge. Tick each box when verified.
 ## Gate 5: BlackCat-Inspired Improvements
 - [x] **Multi-layer cache** (`Core/Cache.ps1`): Graph, AzBatch, General tiers with TTL, LRU eviction, GZip compression (>1KB)
 - [x] **Cacheable-operation wrapper** (`Invoke-CacheableOperation`): cache-check → execute → store pattern
-- [x] **Resource Graph batching** (`Core/ResourceGraph.ps1`): `Invoke-ResourceGraphQuery` with `$skipToken` pagination + `Search-AzGraph` fallback
+- [x] **Resource Graph batching** (`Core/Azure/ResourceGraph.ps1`): `Invoke-ResourceGraphQuery` with `$skipToken` pagination + `Search-AzGraph` fallback
 - [x] **Permission risk mapping** (`ReferenceData/`): `privileged-roles.json` (20 roles), `permission-escalation-map.json` (24 dangerous perms)
 - [ ] **Parallel per-subscription processing**: Declared (`-Parallel` switch) but NOT YET IMPLEMENTED — known gap
 - [x] **Config knobs** (`Core/State.ps1`): `MaxRetryAttempts`, `RetryDelaySeconds`, `MaxRetryDelaySeconds`, `BatchSize`, `PageSize` + `$script:MaxCacheSize` in Cache.ps1
@@ -60,7 +60,7 @@ All gates must pass before merge. Tick each box when verified.
 ---
 
 ### Known Gaps (to address in future PRs)
-1. **Parallel subscription processing** — `-Parallel` switch is declared in `AzureMap.ps1` but `ForEach-Object -Parallel` is not yet implemented. Blueprint item 2.6.
+1. **Parallel subscription processing** — not implemented; the legacy `-Parallel` switch declaration was dropped in the modular rewrite. Blueprint item 2.6.
 2. **Resource Graph migration** — `Invoke-ResourceGraphQuery` exists but no Azure checks use it yet. Blueprint item 2.5.
 3. **Adaptive environment sizing** — Not yet implemented. Blueprint item A5.
 4. **Integration tests** — Only unit tests exist for Core modules. No integration or Entra mock tests yet.

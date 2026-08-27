@@ -2,6 +2,37 @@
 
 All notable AzureMap phases, newest first. Tags mark each accepted phase.
 
+## Unreleased — AzureMap/EntraMap product split
+
+- The combined `azuremap.ps1` is split into two products on one shared core:
+  `azuremap.ps1` (AzureMap — Azure subscriptions, ARM control plane only,
+  never touches Microsoft Graph) and `entramap.ps1` (EntraMap — Entra ID
+  tenant via Microsoft Graph, no subscription discovery or ARM scanning).
+- Shared core stays in `Core/` (Logging, Console, State, RunStatus,
+  CheckRegistry, Retry, Cache, Config, Exclusions, Redaction, capability
+  primitives); product cores live in `Core/Azure/` (ResourceGraph, Footprint,
+  InventoryCache, Rbac, CapabilityModel.Azure, Preflight.Azure) and
+  `Core/Entra/` (Graph, Collection, TenantWide, Preflight.Entra).
+- Tenant-wide identity checks IDENTITY-001 (long-lived credentials),
+  IDENTITY-002 (dormant service principals) and IDENTITY-004 (expired
+  credentials) relocated to EntraMap (`Checks/Entra/TenantIdentity.ps1`) —
+  CheckIds and check logic unchanged. In EntraMap (no Azure subscription
+  scope) the IDENTITY-002 RBAC correlation is reported as NotEvaluated
+  instead of a false clean pass.
+- CLI compatibility notes:
+  - `-SkipEntra` on `azuremap.ps1` is a deprecated no-op (Azure-only is now
+    the only mode); an INFO note is logged.
+  - `-EntraOnly` on `azuremap.ps1` prints guidance to use `entramap.ps1` and
+    stops before any Azure work.
+  - `-UseGraphBeta` moved to `entramap.ps1`; `-ContinueWithoutEntra` was
+    removed (Entra work no longer exists in `azuremap.ps1`).
+  - Entra service names remain in the `azuremap.ps1` `-Services` ValidateSet
+    for compatibility but match zero checks there.
+- Banner, CLI run-mode label and HTML report header are product-aware
+  ("Azure Security Assessment" / "Entra ID Security Assessment").
+- New Phase25 split tests prove each product session carries only its own
+  surface (no Graph code in AzureMap, no ARM discovery code in EntraMap).
+
 ## Release candidate (unreleased)
 
 - Documentation baseline: rewritten README (run modes, switches, data-plane
