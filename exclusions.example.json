@@ -1,0 +1,32 @@
+{
+  "Subscriptions": [
+    "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  ],
+  "Resources": [
+    {
+      "ResourceId": "/subscriptions/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx/resourceGroups/myRG/providers/Microsoft.Storage/storageAccounts/example"
+    },
+    {
+      "NamePattern": "*-dev-*"
+    }
+  ],
+  "Findings": [
+    {
+      "Pattern": "*Shared Key*",
+      "Severity": "HIGH"
+    }
+  ],
+  "Tags": [
+    {
+      "Key": "Environment",
+      "Value": "Dev"
+    }
+  ],
+  "FindingIds": [
+    "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+  ],
+  "Principals": [
+    "00000000-0000-0000-0000-000000000001",
+    "00000000-0000-0000-0000-000000000002"
+  ]
+}

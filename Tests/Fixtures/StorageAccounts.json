@@ -1,0 +1,59 @@
+[
+  {
+    "Id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-prod/providers/Microsoft.Storage/storageAccounts/stsharedkey01",
+    "StorageAccountName": "stsharedkey01",
+    "ResourceGroupName": "rg-prod",
+    "AllowSharedKeyAccess": true,
+    "AllowBlobPublicAccess": false,
+    "PublicNetworkAccess": "Enabled",
+    "EnableHttpsTrafficOnly": true,
+    "MinimumTlsVersion": "TLS1_2",
+    "AllowCrossTenantReplication": false,
+    "Tags": { "env": "prod" },
+    "Context": { "StorageAccountName": "stsharedkey01" },
+    "NetworkRuleSet": {
+      "DefaultAction": "Deny",
+      "Bypass": ["AzureServices"],
+      "IpRules": [],
+      "VirtualNetworkRules": []
+    }
+  },
+  {
+    "Id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-dev/providers/Microsoft.Storage/storageAccounts/stpublic02",
+    "StorageAccountName": "stpublic02",
+    "ResourceGroupName": "rg-dev",
+    "AllowSharedKeyAccess": false,
+    "AllowBlobPublicAccess": true,
+    "PublicNetworkAccess": "Enabled",
+    "EnableHttpsTrafficOnly": true,
+    "MinimumTlsVersion": "TLS1_0",
+    "AllowCrossTenantReplication": true,
+    "Tags": { "env": "dev" },
+    "Context": { "StorageAccountName": "stpublic02" },
+    "NetworkRuleSet": {
+      "DefaultAction": "Allow",
+      "Bypass": ["AzureServices"],
+      "IpRules": [],
+      "VirtualNetworkRules": []
+    }
+  },
+  {
+    "Id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-secure/providers/Microsoft.Storage/storageAccounts/stclean03",
+    "StorageAccountName": "stclean03",
+    "ResourceGroupName": "rg-secure",
+    "AllowSharedKeyAccess": false,
+    "AllowBlobPublicAccess": false,
+    "PublicNetworkAccess": "Disabled",
+    "EnableHttpsTrafficOnly": true,
+    "MinimumTlsVersion": "TLS1_2",
+    "AllowCrossTenantReplication": false,
+    "Tags": { "env": "prod" },
+    "Context": { "StorageAccountName": "stclean03" },
+    "NetworkRuleSet": {
+      "DefaultAction": "Deny",
+      "Bypass": ["AzureServices"],
+      "IpRules": [],
+      "VirtualNetworkRules": []
+    }
+  }
+]

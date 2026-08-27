@@ -1,0 +1,18 @@
+# ── AzureMap generated output & logs (never commit) ──────────────────────────
+# Runtime logs
+*.log
+
+# Exported audit results (may contain tenant/subscription/resource identifiers)
+AzureSecurityAudit-*.csv
+AzureSecurityAudit-*.json
+AzureSecurityAudit-*.html
+
+# Pester / test output
+testResults.xml
+
+# Generated output directories
+output/
+logs/
+exports/
+debug/
+raw/

@@ -1,0 +1,30 @@
+[
+  {
+    "VaultName": "kv-legacy-norbac",
+    "ResourceGroupName": "rg-security",
+    "ResourceId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-security/providers/Microsoft.KeyVault/vaults/kv-legacy-norbac",
+    "EnableRbacAuthorization": false,
+    "EnablePurgeProtection": false,
+    "Tags": { "env": "prod" },
+    "NetworkAcls": {
+      "DefaultAction": "Allow",
+      "Bypass": "AzureServices",
+      "IpAddressRanges": [],
+      "VirtualNetworkResourceIds": []
+    }
+  },
+  {
+    "VaultName": "kv-secure-rbac",
+    "ResourceGroupName": "rg-security",
+    "ResourceId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-security/providers/Microsoft.KeyVault/vaults/kv-secure-rbac",
+    "EnableRbacAuthorization": true,
+    "EnablePurgeProtection": true,
+    "Tags": { "env": "prod" },
+    "NetworkAcls": {
+      "DefaultAction": "Deny",
+      "Bypass": "AzureServices",
+      "IpAddressRanges": ["10.0.0.0/24"],
+      "VirtualNetworkResourceIds": ["/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-prod/subnets/default"]
+    }
+  }
+]

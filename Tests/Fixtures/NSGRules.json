@@ -1,0 +1,55 @@
+[
+  {
+    "Id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-network/providers/Microsoft.Network/networkSecurityGroups/nsg-permissive",
+    "Name": "nsg-permissive",
+    "ResourceGroupName": "rg-network",
+    "Tags": {},
+    "SecurityRules": [
+      {
+        "Name": "AllowSSH-Internet",
+        "Access": "Allow",
+        "Direction": "Inbound",
+        "Protocol": "Tcp",
+        "SourceAddressPrefix": "Internet",
+        "SourceAddressPrefixes": null,
+        "DestinationPortRange": "22",
+        "DestinationPortRanges": null,
+        "DestinationAddressPrefix": "*",
+        "Priority": 100
+      },
+      {
+        "Name": "AllowAllOutbound",
+        "Access": "Allow",
+        "Direction": "Outbound",
+        "Protocol": "*",
+        "SourceAddressPrefix": "*",
+        "SourceAddressPrefixes": null,
+        "DestinationAddressPrefix": "Internet",
+        "DestinationAddressPrefixes": null,
+        "DestinationPortRange": "*",
+        "DestinationPortRanges": null,
+        "Priority": 200
+      }
+    ]
+  },
+  {
+    "Id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-network/providers/Microsoft.Network/networkSecurityGroups/nsg-clean",
+    "Name": "nsg-clean",
+    "ResourceGroupName": "rg-network",
+    "Tags": {},
+    "SecurityRules": [
+      {
+        "Name": "AllowVNetInbound",
+        "Access": "Allow",
+        "Direction": "Inbound",
+        "Protocol": "Tcp",
+        "SourceAddressPrefix": "VirtualNetwork",
+        "SourceAddressPrefixes": null,
+        "DestinationPortRange": "443",
+        "DestinationPortRanges": null,
+        "DestinationAddressPrefix": "VirtualNetwork",
+        "Priority": 100
+      }
+    ]
+  }
+]

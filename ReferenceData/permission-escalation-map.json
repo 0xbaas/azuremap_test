@@ -1,0 +1,179 @@
+{
+    "dangerousPermissions": [
+        {
+            "permission": "Domain.ReadWrite.All",
+            "severity": "Critical",
+            "attackPath": "Can add/verify federated domains and forge SAML tokens for any hybrid user, including Global Administrator, enabling full tenant compromise via federated domain backdoor.",
+            "recommendation": "Restrict to trusted break-glass workloads only. Enforce app instance property locks and prefer cloud-only privileged accounts.",
+            "compromisedRoles": ["Global Administrator", "Hybrid Identity Administrator"]
+        },
+        {
+            "permission": "RoleManagement.ReadWrite.Directory",
+            "severity": "Critical",
+            "attackPath": "Allows modification of privileged role assignments, effectively equivalent to Privileged Role Administrator. Can assign Global Administrator to any principal.",
+            "recommendation": "Limit to break-glass workloads. Monitor role assignment events via audit log alerts. Require PIM for any workload with this permission.",
+            "compromisedRoles": ["Privileged Role Administrator", "Global Administrator"]
+        },
+        {
+            "permission": "AppRoleAssignment.ReadWrite.All",
+            "severity": "High",
+            "attackPath": "Can grant any application permission to any service principal, enabling lateral movement into higher-privileged apps and bootstrapping to RoleManagement.ReadWrite.Directory.",
+            "recommendation": "Require justification and PIM activation for workloads with this permission. Monitor appRoleAssignment creation events.",
+            "compromisedRoles": ["Application Administrator", "Cloud Application Administrator"]
+        },
+        {
+            "permission": "Application.ReadWrite.All",
+            "severity": "High",
+            "attackPath": "Can add credentials to and modify any application or service principal, enabling service principal hijacking for privileged apps.",
+            "recommendation": "Enforce app instance property locks. Move to managed identities with scoped permissions. Monitor credential addition events.",
+            "compromisedRoles": ["Application Administrator", "Cloud Application Administrator"]
+        },
+        {
+            "permission": "Group.ReadWrite.All",
+            "severity": "High",
+            "attackPath": "Can modify membership of any Microsoft 365 or role-assignable group, enabling indirect elevation to platform roles through group nesting.",
+            "recommendation": "Use administrative units and least-privilege scopes. Avoid granting to unattended apps. Restrict role-assignable group management to PRA.",
+            "compromisedRoles": ["User Administrator", "Groups Administrator"]
+        },
+        {
+            "permission": "DeviceManagementConfiguration.ReadWrite.All",
+            "severity": "High",
+            "attackPath": "Authorizes writing Intune device configuration and scripts that run as SYSTEM on managed devices, enabling capture of privileged sessions on PAWs.",
+            "recommendation": "Require multi-admin approval for Intune changes. Lock down workload identity usage. Segment PAW management from general Intune.",
+            "compromisedRoles": ["Intune Administrator"]
+        },
+        {
+            "permission": "Mail.ReadWrite",
+            "severity": "High",
+            "attackPath": "Full read/write access to all user mailboxes. Enables exfiltration of sensitive emails, password reset intercept, and BEC attacks.",
+            "recommendation": "Replace with Mail.Read where possible. Scope to specific mailboxes via application access policies. Monitor mailbox access patterns.",
+            "compromisedRoles": ["Exchange Administrator"]
+        },
+        {
+            "permission": "User.ReadWrite.All",
+            "severity": "High",
+            "attackPath": "Can modify user properties including authentication methods, enabling account takeover by resetting MFA or adding authentication methods.",
+            "recommendation": "Scope to specific administrative units. Use Conditional Access to protect privileged users from property modification.",
+            "compromisedRoles": ["User Administrator", "Authentication Administrator"]
+        },
+        {
+            "permission": "Policy.ReadWrite.ConditionalAccess",
+            "severity": "High",
+            "attackPath": "Can create, modify, or delete Conditional Access policies, enabling bypass of MFA requirements and location-based restrictions for all users.",
+            "recommendation": "Protect with PIM and require approval. Monitor CA policy changes via audit log. Use policy versioning and backup.",
+            "compromisedRoles": ["Conditional Access Administrator", "Security Administrator"]
+        },
+        {
+            "permission": "MailboxSettings.ReadWrite",
+            "severity": "High",
+            "attackPath": "Can modify mailbox settings including forwarding rules and inbox rules for all users, enabling silent email exfiltration and BEC persistence.",
+            "recommendation": "Scope via application access policies. Monitor mailbox rule creation. Block external forwarding at transport level.",
+            "compromisedRoles": ["Exchange Administrator"]
+        },
+        {
+            "permission": "Sites.ReadWrite.All",
+            "severity": "High",
+            "attackPath": "Full read/write access to all SharePoint sites. Enables data exfiltration, malware upload to trusted locations, and document tampering.",
+            "recommendation": "Scope to specific sites via Sites.Selected. Monitor bulk file access patterns. Enable DLP policies.",
+            "compromisedRoles": ["SharePoint Administrator"]
+        },
+        {
+            "permission": "Files.ReadWrite.All",
+            "severity": "High",
+            "attackPath": "Full read/write to all OneDrive and SharePoint files. Enables data exfiltration at scale and supply chain attacks via document modification.",
+            "recommendation": "Replace with Files.ReadWrite.AppFolder or scoped Sites.Selected. Monitor high-volume file operations.",
+            "compromisedRoles": ["SharePoint Administrator"]
+        },
+        {
+            "permission": "Exchange.ManageAsApp",
+            "severity": "High",
+            "attackPath": "Grants full Exchange Online management as an application, including mailbox access, transport rules, and organization-wide settings.",
+            "recommendation": "Limit to dedicated Exchange management apps. Require PIM activation. Monitor Exchange admin audit log.",
+            "compromisedRoles": ["Exchange Administrator"]
+        },
+        {
+            "permission": "Directory.ReadWrite.All",
+            "severity": "Medium",
+            "attackPath": "Broad ability to modify directory objects including users, groups, and devices. Can be chained with other misconfigurations for escalation.",
+            "recommendation": "Swap for granular scopes (User.ReadWrite.All, Group.ReadWrite.All). Partition into administrative units.",
+            "compromisedRoles": ["Directory Writers"]
+        },
+        {
+            "permission": "GroupMember.ReadWrite.All",
+            "severity": "Medium",
+            "attackPath": "Can modify group memberships for all groups. If role-assignable groups exist, can indirectly gain role assignments.",
+            "recommendation": "Use Group.ReadWrite.All with administrative unit scoping. Restrict role-assignable group membership changes to PRA.",
+            "compromisedRoles": ["Groups Administrator"]
+        },
+        {
+            "permission": "ServicePrincipalEndpoint.ReadWrite.All",
+            "severity": "Medium",
+            "attackPath": "Can modify service principal endpoints, enabling redirection of authentication flows to attacker-controlled infrastructure.",
+            "recommendation": "Audit service principal endpoint configurations regularly. Restrict to infrastructure automation accounts.",
+            "compromisedRoles": ["Application Administrator"]
+        },
+        {
+            "permission": "DelegatedPermissionGrant.ReadWrite.All",
+            "severity": "Medium",
+            "attackPath": "Can create OAuth2 delegated permission grants on behalf of any user, enabling consent phishing at scale without user interaction.",
+            "recommendation": "Restrict to governance automation only. Monitor oauth2PermissionGrant creation events. Enforce admin consent workflow.",
+            "compromisedRoles": ["Application Administrator", "Cloud Application Administrator"]
+        },
+        {
+            "permission": "Organization.ReadWrite.All",
+            "severity": "Medium",
+            "attackPath": "Can modify tenant-wide organization settings including branding, technical contacts, and partner relationships.",
+            "recommendation": "Restrict to tenant configuration automation. Monitor organization setting changes.",
+            "compromisedRoles": ["Global Administrator"]
+        },
+        {
+            "permission": "Device.ReadWrite.All",
+            "severity": "Medium",
+            "attackPath": "Can modify device objects in directory. Enables device impersonation, bypass of device-based Conditional Access policies.",
+            "recommendation": "Use Cloud Device Administrator role instead of API permission. Scope to specific device types via filters.",
+            "compromisedRoles": ["Cloud Device Administrator", "Intune Administrator"]
+        },
+        {
+            "permission": "AccessReview.ReadWrite.All",
+            "severity": "Medium",
+            "attackPath": "Can create, modify, and auto-approve access reviews, enabling persistence of unauthorized access by approving reviews programmatically.",
+            "recommendation": "Restrict to governance automation accounts. Monitor access review completion and approval patterns.",
+            "compromisedRoles": ["Identity Governance Administrator"]
+        },
+        {
+            "permission": "PrivilegedAccess.ReadWrite.AzureADGroup",
+            "severity": "Medium",
+            "attackPath": "Can manage PIM settings for groups, including modifying eligibility schedules and activation requirements, weakening JIT controls.",
+            "recommendation": "Restrict to PIM governance automation only. Monitor PIM policy changes. Require approval for PIM setting modifications.",
+            "compromisedRoles": ["Privileged Role Administrator"]
+        },
+        {
+            "permission": "EntitlementManagement.ReadWrite.All",
+            "severity": "Medium",
+            "attackPath": "Can modify entitlement management access packages and policies, enabling unauthorized resource access provisioning at scale.",
+            "recommendation": "Restrict to identity governance automation. Monitor access package creation and assignment events.",
+            "compromisedRoles": ["Identity Governance Administrator"]
+        },
+        {
+            "permission": "RoleManagementPolicy.ReadWrite.Directory",
+            "severity": "Medium",
+            "attackPath": "Can modify PIM role policies including activation duration, approval requirements, and notification settings, weakening JIT guardrails.",
+            "recommendation": "Restrict to PIM governance accounts. Monitor role management policy changes. Require approval for policy modifications.",
+            "compromisedRoles": ["Privileged Role Administrator"]
+        },
+        {
+            "permission": "UserAuthenticationMethod.ReadWrite.All",
+            "severity": "Medium",
+            "attackPath": "Can read and modify authentication methods (MFA, FIDO2, phone) for all users, enabling account takeover by replacing authentication factors.",
+            "recommendation": "Scope via authentication method policies. Require PIM for activation. Monitor authentication method changes for privileged users.",
+            "compromisedRoles": ["Authentication Administrator", "Privileged Authentication Administrator"]
+        },
+        {
+            "permission": "Calendars.ReadWrite",
+            "severity": "Medium",
+            "attackPath": "Full read/write access to all user calendars. Enables reconnaissance of executive schedules and injection of phishing calendar invites.",
+            "recommendation": "Scope to specific mailboxes via application access policies. Replace with Calendars.Read where write is unnecessary.",
+            "compromisedRoles": ["Exchange Administrator"]
+        }
+    ]
+}

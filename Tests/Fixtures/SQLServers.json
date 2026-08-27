@@ -1,0 +1,35 @@
+[
+  {
+    "Id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-data/providers/Microsoft.Sql/servers/sqlsvr-public",
+    "ServerName": "sqlsvr-public",
+    "ResourceGroupName": "rg-data",
+    "PublicNetworkAccess": "Enabled",
+    "MinimalTlsVersion": "1.0",
+    "Tags": { "env": "dev" },
+    "Auditing": {
+      "AuditState": "Disabled"
+    },
+    "AADAdmin": null,
+    "TDE": {
+      "ServerKeyType": "ServiceManaged"
+    }
+  },
+  {
+    "Id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-data/providers/Microsoft.Sql/servers/sqlsvr-secure",
+    "ServerName": "sqlsvr-secure",
+    "ResourceGroupName": "rg-data",
+    "PublicNetworkAccess": "Disabled",
+    "MinimalTlsVersion": "1.2",
+    "Tags": { "env": "prod" },
+    "Auditing": {
+      "AuditState": "Enabled"
+    },
+    "AADAdmin": {
+      "DisplayName": "SQL Admin Group",
+      "ObjectId": "44444444-4444-4444-4444-444444444444"
+    },
+    "TDE": {
+      "ServerKeyType": "AzureKeyVault"
+    }
+  }
+]
