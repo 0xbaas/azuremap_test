@@ -19,7 +19,7 @@ BeforeAll {
     . "$projectRoot\Core\Retry.ps1"
     . "$projectRoot\Core\RunStatus.ps1"
     . "$projectRoot\Core\CheckRegistry.ps1"
-    . "$projectRoot\Core\InventoryCache.ps1"
+    . "$projectRoot\Core\Azure\InventoryCache.ps1"
     . "$projectRoot\Checks\Azure\Storage.ps1"
     . "$projectRoot\Checks\Azure\StorageKey.ps1"
     . "$projectRoot\Checks\Azure\Identity.ps1"
@@ -281,7 +281,7 @@ Describe "Phase15 - B1 smoke cleanup" {
         It "repo runtime code contains no Invoke-WebRequest and startup pins UseBasicParsing" {
             $repoRoot = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
             $files = @()
-            $files += Get-ChildItem (Join-Path $repoRoot 'Core') -Filter *.ps1
+            $files += Get-ChildItem (Join-Path $repoRoot 'Core') -Filter *.ps1 -Recurse
             $files += Get-ChildItem (Join-Path $repoRoot 'Checks') -Filter *.ps1 -Recurse
             $files += Get-ChildItem (Join-Path $repoRoot 'Export') -Filter *.ps1
             foreach ($f in $files) {
@@ -298,7 +298,7 @@ Describe "Phase15 - B1 smoke cleanup" {
             # Belt-and-braces over the session pin: the PS 5.1 "Script Execution
             # Risk" Y/A/N prompt must be impossible even if the pin is lost.
             $repoRoot = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
-            $graph = Get-Content (Join-Path $repoRoot 'Core\Graph.ps1') -Raw
+            $graph = Get-Content (Join-Path $repoRoot 'Core\Entra\Graph.ps1') -Raw
             $callCount = ([regex]::Matches($graph, 'Invoke-RestMethod')).Count
             $callCount | Should -BeGreaterThan 0
             ([regex]::Matches($graph, 'UseBasicParsing')).Count | Should -BeGreaterOrEqual $callCount
@@ -307,7 +307,7 @@ Describe "Phase15 - B1 smoke cleanup" {
         It "repo runtime code has no interactive input primitives" {
             $repoRoot = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
             $files = @()
-            $files += Get-ChildItem (Join-Path $repoRoot 'Core') -Filter *.ps1
+            $files += Get-ChildItem (Join-Path $repoRoot 'Core') -Filter *.ps1 -Recurse
             $files += Get-ChildItem (Join-Path $repoRoot 'Checks') -Filter *.ps1 -Recurse
             $files += Get-ChildItem (Join-Path $repoRoot 'Export') -Filter *.ps1
             $files += Get-Item (Join-Path $repoRoot 'azuremap.ps1')

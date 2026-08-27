@@ -1,8 +1,8 @@
-﻿#==============================================================================
+#==============================================================================
 # AzureMap v2 - Checks/Entra/Collect.ps1
 # Centralized Entra ID data collector. Runs once per audit (tenant-scoped).
 # Populates $script:State.Entra with all Graph data needed by Entra checks.
-# All Graph calls use Invoke-GraphCommand / Invoke-GraphBatch (Core/Graph.ps1).
+# All Graph calls use Invoke-GraphCommand / Invoke-GraphBatch (Core/Entra/Graph.ps1).
 #==============================================================================
 
 function Invoke-EntraCollection {

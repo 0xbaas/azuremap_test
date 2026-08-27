@@ -57,7 +57,7 @@ function Test-StorageKeyExposure {
     foreach ($sub in @($Subscriptions)) {
         # Perf phase: shared per-run inventory (one enumeration per subscription
         # across ALL storage checks). The cache fetch feature-detects
-        # -IncludeAccountSASPolicy itself (Core/InventoryCache.ps1). ContextSwitch
+        # -IncludeAccountSASPolicy itself (Core/Azure/InventoryCache.ps1). ContextSwitch
         # -> skipped sub; Fetch -> failed collection (same coverage semantics).
         $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind StorageAccounts
         if ($inv.Unavailable) {

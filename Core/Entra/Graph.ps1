@@ -1,5 +1,5 @@
 #==============================================================================
-# AzureMap v2 - Core/Graph.ps1
+# AzureMap v2 - Core/Entra/Graph.ps1
 # Microsoft Graph REST API engine: token management, single/batch requests,
 # auto-pagination, JWT scope validation.
 # All functions reference $script:State. Strictly read-only.

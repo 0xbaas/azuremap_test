@@ -122,11 +122,14 @@ $scriptRoot = $PSScriptRoot
 . "$scriptRoot\Core\Config.ps1"
 . "$scriptRoot\Core\Exclusions.ps1"
 
-# Remaining Core modules (Retry, Graph, ResourceGraph, Cache, CheckRegistry)
-foreach ($coreFile in Get-ChildItem -Path "$scriptRoot\Core\*.ps1" -File) {
-    $alreadyLoaded = @("State.ps1", "Logging.ps1", "Config.ps1", "Exclusions.ps1")
-    if ($coreFile.Name -notin $alreadyLoaded) {
-        . $coreFile.FullName
+# Remaining Core modules (Retry, Cache, CheckRegistry, ...) plus the product
+# subtrees (Core\Azure, Core\Entra). Both products are loaded for now.
+$alreadyLoaded = @("State.ps1", "Logging.ps1", "Config.ps1", "Exclusions.ps1")
+foreach ($coreDir in @("$scriptRoot\Core", "$scriptRoot\Core\Azure", "$scriptRoot\Core\Entra")) {
+    foreach ($coreFile in Get-ChildItem -Path "$coreDir\*.ps1" -File -ErrorAction SilentlyContinue) {
+        if ($coreFile.Name -notin $alreadyLoaded) {
+            . $coreFile.FullName
+        }
     }
 }
 

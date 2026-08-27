@@ -15,7 +15,7 @@ BeforeAll {
     . "$projectRoot\Core\Exclusions.ps1"
     . "$projectRoot\Core\CheckRegistry.ps1"
     . "$projectRoot\Core\Retry.ps1"
-    . "$projectRoot\Core\Collection.ps1"
+    . "$projectRoot\Core\Entra\Collection.ps1"
 
     $script:State = Initialize-AuditState
     $script:State.Config.Quiet = $true

@@ -55,7 +55,7 @@ function Initialize-AuditState {
 
         # Footprint: normalized subscription list for error-message normalization.
         Subscriptions = @()
-        # Environment footprint (Core/Footprint.ps1): subscriptions/RGs/resources/
+        # Environment footprint (Core/Azure/Footprint.ps1): subscriptions/RGs/resources/
         # resource-type counts. $null until the pre-scan runs; drives applicability.
         Footprint = $null
         # Phase B2 capability model (Core/CapabilityModel.ps1): nodes/edges/
@@ -134,7 +134,7 @@ function Initialize-AuditState {
             # modeling (Phase B2): key "<subscriptionId>" -> slim projections
             # @{ RoleGuid; RoleName; Actions; DataActions }. In-memory only.
             RoleDefinitions = @{}
-            # Per-run inventory cache (Core/InventoryCache.ps1): key
+            # Per-run inventory cache (Core/Azure/InventoryCache.ps1): key
             # "<subscriptionId>|<Kind>" -> @{ Items; ProvenEmpty; Unavailable }.
             # In-memory only, cleared at end of run; never written to disk.
             ResourceLists   = @{}

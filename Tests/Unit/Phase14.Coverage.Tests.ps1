@@ -22,7 +22,7 @@ BeforeAll {
     . "$projectRoot\Core\Exclusions.ps1"
     . "$projectRoot\Core\Retry.ps1"
     . "$projectRoot\Core\RunStatus.ps1"
-    . "$projectRoot\Core\Footprint.ps1"
+    . "$projectRoot\Core\Azure\Footprint.ps1"
     . "$projectRoot\Core\CheckRegistry.ps1"
     . "$projectRoot\Core\Console.ps1"
     . "$projectRoot\Export\Csv.ps1"

@@ -20,7 +20,7 @@ BeforeAll {
     . "$projectRoot\Core\Retry.ps1"
     . "$projectRoot\Core\RunStatus.ps1"
     . "$projectRoot\Core\CheckRegistry.ps1"
-    . "$projectRoot\Core\InventoryCache.ps1"
+    . "$projectRoot\Core\Azure\InventoryCache.ps1"
     . "$projectRoot\Core\CapabilityModel.ps1"
     . "$projectRoot\Core\Console.ps1"
     . "$projectRoot\Export\Html.ps1"

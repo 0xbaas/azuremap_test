@@ -113,7 +113,7 @@ BeforeAll {
     }
 
     # Source the shared per-run inventory cache used by converted checks
-    . "$ProjectRoot\Core\InventoryCache.ps1"
+    . "$ProjectRoot\Core\Azure\InventoryCache.ps1"
 
     # Source all v2 check files
     $checkFiles = Get-ChildItem (Join-Path $ProjectRoot "Checks\Azure\*.ps1")

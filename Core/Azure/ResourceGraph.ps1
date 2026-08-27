@@ -1,5 +1,5 @@
 #==============================================================================
-# AzureMap v2 - Core/ResourceGraph.ps1
+# AzureMap v2 - Core/Azure/ResourceGraph.ps1
 # Cross-subscription KQL query engine via Azure Resource Graph.
 # Falls back to Search-AzGraph if Az.ResourceGraph is available.
 # All functions reference $script:State. Strictly read-only.

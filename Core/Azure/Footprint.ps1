@@ -1,5 +1,5 @@
 #==============================================================================
-# AzureMap v2 - Core/Footprint.ps1
+# AzureMap v2 - Core/Azure/Footprint.ps1
 # Environment footprint pre-scan: discovers the shape of the environment
 # (subscriptions, resource groups, resources, resource types, regions, top
 # services) BEFORE checks run. Read-only: Azure Resource Graph when available,

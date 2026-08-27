@@ -22,7 +22,7 @@ BeforeAll {
     . "$projectRoot\Core\Exclusions.ps1"
     . "$projectRoot\Core\Retry.ps1"
     . "$projectRoot\Core\RunStatus.ps1"
-    . "$projectRoot\Core\Footprint.ps1"
+    . "$projectRoot\Core\Azure\Footprint.ps1"
     . "$projectRoot\Core\CheckRegistry.ps1"
     . "$projectRoot\Core\Console.ps1"
     . "$projectRoot\Export\Json.ps1"
@@ -236,7 +236,7 @@ Describe "Safety grep - no key/secret/content retrieval in runtime code" {
 
     BeforeAll {
         $script:runtimeFiles = @(
-            Get-ChildItem -Path (Join-Path $projectRoot 'Core')    -Filter *.ps1 -File
+            Get-ChildItem -Path (Join-Path $projectRoot 'Core')    -Filter *.ps1 -File -Recurse
             Get-ChildItem -Path (Join-Path $projectRoot 'Checks')  -Filter *.ps1 -File -Recurse
             Get-ChildItem -Path (Join-Path $projectRoot 'Export')  -Filter *.ps1 -File
             Get-Item (Join-Path $projectRoot 'azuremap.ps1')

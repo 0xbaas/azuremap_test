@@ -1,5 +1,5 @@
 #==============================================================================
-# AzureMap v2 - Core/Collection.ps1
+# AzureMap v2 - Core/Entra/Collection.ps1
 # Central collection-phase orchestration. Decides, in one testable place,
 # whether Graph/Entra/tenant-wide identity collection runs.
 #

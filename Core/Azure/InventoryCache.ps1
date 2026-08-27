@@ -1,5 +1,5 @@
 #==============================================================================
-# AzureMap v2 - Core/InventoryCache.ps1
+# AzureMap v2 - Core/Azure/InventoryCache.ps1
 # Per-run, in-memory inventory cache for per-subscription resource lists
 # (perf phase). Checks previously re-enumerated the same resource types once
 # per check per subscription (e.g. Get-AzStorageAccount 7x per subscription);

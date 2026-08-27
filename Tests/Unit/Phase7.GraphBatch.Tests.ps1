@@ -13,7 +13,7 @@ BeforeAll {
     . "$projectRoot\Core\State.ps1"
     . "$projectRoot\Core\Logging.ps1"
     . "$projectRoot\Core\Retry.ps1"
-    . "$projectRoot\Core\Graph.ps1"
+    . "$projectRoot\Core\Entra\Graph.ps1"
 
     $script:State = Initialize-AuditState
     $script:State.Config.Quiet = $true

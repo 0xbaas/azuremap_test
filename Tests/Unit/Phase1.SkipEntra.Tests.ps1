@@ -17,7 +17,7 @@ BeforeAll {
     . "$projectRoot\Core\Logging.ps1"
     . "$projectRoot\Core\Exclusions.ps1"
     . "$projectRoot\Core\CheckRegistry.ps1"
-    . "$projectRoot\Core\Collection.ps1"
+    . "$projectRoot\Core\Entra\Collection.ps1"
     . "$projectRoot\Checks\Azure\Identity.ps1"
 
     $script:State = Initialize-AuditState

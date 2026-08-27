@@ -14,7 +14,7 @@ BeforeAll {
     . "$projectRoot\Core\Retry.ps1"
     . "$projectRoot\Core\RunStatus.ps1"
     . "$projectRoot\Core\CheckRegistry.ps1"
-    . "$projectRoot\Core\InventoryCache.ps1"
+    . "$projectRoot\Core\Azure\InventoryCache.ps1"
 
     # ---- Az stubs (global so script-scoped cache code resolves them) ----
     function global:Set-AzContext {
@@ -132,7 +132,7 @@ Describe "Performance phase" {
         }
 
         It "cache lives only in memory (State.Cache.ResourceLists); module contains no disk writes" {
-            $src = Get-Content -Raw (Join-Path $projectRoot 'Core\InventoryCache.ps1')
+            $src = Get-Content -Raw (Join-Path $projectRoot 'Core\Azure\InventoryCache.ps1')
             $src | Should -Not -Match 'Out-File|Set-Content|Add-Content|Export-Clixml|ConvertTo-Json\s*\|'
             $global:PerfKvItems = @()
             [void](Get-SubscriptionInventory -SubscriptionId $global:PerfSub.Id -Kind KeyVaults)
