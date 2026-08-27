@@ -19,6 +19,8 @@ BeforeAll {
     . "$projectRoot\Core\Retry.ps1"
     . "$projectRoot\Core\RunStatus.ps1"
     . "$projectRoot\Core\CheckRegistry.ps1"
+    . "$projectRoot\Core\Azure\Rbac.ps1"
+    . "$projectRoot\Core\Entra\TenantWide.ps1"
     . "$projectRoot\Core\Azure\InventoryCache.ps1"
     . "$projectRoot\Checks\Azure\Storage.ps1"
     . "$projectRoot\Checks\Azure\StorageKey.ps1"

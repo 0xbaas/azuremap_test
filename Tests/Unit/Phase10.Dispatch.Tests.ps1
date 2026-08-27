@@ -14,6 +14,7 @@ BeforeAll {
     . "$projectRoot\Core\Logging.ps1"
     . "$projectRoot\Core\Exclusions.ps1"
     . "$projectRoot\Core\CheckRegistry.ps1"
+    . "$projectRoot\Core\Azure\Rbac.ps1"
     . "$projectRoot\Core\Retry.ps1"
     . "$projectRoot\Core\Entra\Collection.ps1"
 

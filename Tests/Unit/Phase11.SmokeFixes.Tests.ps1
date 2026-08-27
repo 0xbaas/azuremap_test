@@ -22,6 +22,7 @@ BeforeAll {
     . "$projectRoot\Core\RunStatus.ps1"
     . "$projectRoot\Core\Azure\Footprint.ps1"
     . "$projectRoot\Core\CheckRegistry.ps1"
+    . "$projectRoot\Core\Azure\Rbac.ps1"
     . "$projectRoot\Core\Console.ps1"
 
     $script:State = Initialize-AuditState

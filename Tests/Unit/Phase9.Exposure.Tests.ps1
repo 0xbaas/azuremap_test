@@ -9,6 +9,7 @@ BeforeAll {
     . "$projectRoot\Core\Logging.ps1"
     . "$projectRoot\Core\Exclusions.ps1"
     . "$projectRoot\Core\CheckRegistry.ps1"
+    . "$projectRoot\Core\Azure\Rbac.ps1"
     . "$projectRoot\Core\Retry.ps1"
     . "$projectRoot\Core\Azure\InventoryCache.ps1"
     . "$projectRoot\Checks\Azure\Exposure.ps1"

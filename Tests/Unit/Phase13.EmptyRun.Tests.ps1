@@ -16,6 +16,7 @@ BeforeAll {
     . "$projectRoot\Core\Redaction.ps1"
     . "$projectRoot\Core\RunStatus.ps1"
     . "$projectRoot\Core\CheckRegistry.ps1"
+    . "$projectRoot\Core\Azure\Rbac.ps1"
     . "$projectRoot\Export\Csv.ps1"
     . "$projectRoot\Export\Json.ps1"
 }
