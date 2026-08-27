@@ -722,7 +722,10 @@ function Invoke-AzureMapCheck {
         }
     }
 
-    if ($Check.Category -eq 'Entra' -and $Check.RequiredPerms.Count -gt 0) {
+    # Graph scope check only when the Entra modules are loaded (azuremap.ps1 is
+    # ARM-only after the product split; the guard makes this a safe no-op there).
+    if ($Check.Category -eq 'Entra' -and $Check.RequiredPerms.Count -gt 0 -and
+        (Get-Command -Name 'Test-GraphTokenScopes' -ErrorAction SilentlyContinue)) {
         try {
             $scopeResult = Test-GraphTokenScopes -RequiredScopes $Check.RequiredPerms
             if (-not $scopeResult.IsValid) {

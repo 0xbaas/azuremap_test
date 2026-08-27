@@ -115,11 +115,13 @@ BeforeAll {
     # Source the shared per-run inventory cache used by converted checks
     . "$ProjectRoot\Core\Azure\InventoryCache.ps1"
 
-    # Source all v2 check files
+    # Source all v2 check files (plus the relocated tenant-identity checks so
+    # the loadable-function sweep still covers them)
     $checkFiles = Get-ChildItem (Join-Path $ProjectRoot "Checks\Azure\*.ps1")
     foreach ($f in $checkFiles) {
         . $f.FullName
     }
+    . (Join-Path $ProjectRoot "Checks\Entra\TenantIdentity.ps1")
 }
 
 BeforeEach {
@@ -341,7 +343,7 @@ Describe "Test-SQLAdvancedSecurity" {
 # ---------------------------------------------------------------------------
 #  CROSS-CUTTING: Verify all check functions exist after loading modules
 # ---------------------------------------------------------------------------
-Describe "All 38 Azure check functions are loadable" {
+Describe "All 38 check functions are loadable (35 Azure + 3 relocated tenant-identity)" {
     It "All 38 Azure check functions should be defined" {
         $expectedFunctions = @(
             "Test-LongLivedCredentials", "Test-DormantServicePrincipals", "Test-ExcessiveRBAC",

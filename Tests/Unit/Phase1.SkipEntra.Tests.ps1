@@ -19,7 +19,7 @@ BeforeAll {
     . "$projectRoot\Core\CheckRegistry.ps1"
     . "$projectRoot\Core\Entra\TenantWide.ps1"
     . "$projectRoot\Core\Entra\Collection.ps1"
-    . "$projectRoot\Checks\Azure\Identity.ps1"
+    . "$projectRoot\Checks\Entra\TenantIdentity.ps1"
 
     $script:State = Initialize-EntraAuditState
     $script:State.Config.Quiet         = $true

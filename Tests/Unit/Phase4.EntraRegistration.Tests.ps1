@@ -43,11 +43,27 @@ Describe "Entra check registration" {
         $script:State.CheckRegistry.CheckId | Should -Contain 'ENTRA-08'
     }
 
-    It "registers all eight Entra checks (ENTRA-01..ENTRA-08)" {
+    It "registers all twelve Entra checks (ENTRA-01..ENTRA-12)" {
         Invoke-EntraRegistration
-        1..8 | ForEach-Object {
-            $id = "ENTRA-0$_"
+        1..12 | ForEach-Object {
+            $id = "ENTRA-{0:d2}" -f $_
             $script:State.CheckRegistry.CheckId | Should -Contain $id
+        }
+    }
+
+    It "registers the relocated tenant-identity checks (IDENTITY-001/002/004)" {
+        Invoke-EntraRegistration
+        'IDENTITY-001', 'IDENTITY-002', 'IDENTITY-004' | ForEach-Object {
+            $script:State.CheckRegistry.CheckId | Should -Contain $_
+        }
+    }
+
+    It "registers relocated tenant-identity checks as Category 'Entra', Phase 'TenantWide'" {
+        Invoke-EntraRegistration
+        foreach ($id in 'IDENTITY-001', 'IDENTITY-002', 'IDENTITY-004') {
+            $def = $script:State.CheckRegistry | Where-Object { $_.CheckId -eq $id }
+            $def.Category | Should -Be 'Entra'
+            $def.Phase    | Should -Be 'TenantWide'
         }
     }
 
