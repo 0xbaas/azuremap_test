@@ -585,6 +585,30 @@ function Show-AuditConsole {
         }
     }
 
+    # ---- Capability insights (Phase B2): top 5 only; full graph lives in
+    #      the HTML/JSON exports. No per-edge detail in the normal CLI. ----
+    $capModel = $script:State.CapabilityModel
+    if ($capModel) {
+        Write-ConsoleLine ''
+        Write-ConsoleLine 'Capability insights' 'Cyan'
+        $capInsights = @($capModel.Insights)
+        if ($capInsights.Count -eq 0) {
+            Write-ConsoleLine '  (none)' 'DarkGray'
+        } else {
+            $capRank = 0
+            foreach ($ci in @($capInsights | Select-Object -First 5)) {
+                $capRank++
+                $capColor = switch ("$($ci.Severity)".ToUpper()) { 'CRITICAL' {'CritRed'} 'HIGH' {'DarkYellow'} 'MEDIUM' {'Yellow'} 'LOW' {'LightGreen'} default {'Cyan'} }
+                Write-UiHost -Text (Format-UiColumn -Text ("  {0}. {1}" -f $capRank, $ci.Title) -Width 52) -Color Gray -NoNewline
+                Write-UiHost -Text (Format-UiColumn -Text ("$($ci.Severity)".ToUpper()) -Width 10) -Color $capColor -NoNewline
+                Write-ConsoleLine ("{0} {1}" -f (Format-UiNumber $ci.ImpactedResourceCount), $ci.ResourceUnit)
+            }
+            if ($capInsights.Count -gt 5) {
+                Write-ConsoleLine ("  ... and {0} more. See HTML/JSON exports." -f ($capInsights.Count - 5)) 'DarkGray'
+            }
+        }
+    }
+
     # ---- Checks needing attention (no raw error text / identifiers) ----
     $attention = @($script:State.ExecutedChecks | Where-Object {
         "$($_.Status)" -eq 'NotEvaluated' -or "$($_.Status)" -eq 'Error' -or "$($_.Status)" -eq 'Partial'

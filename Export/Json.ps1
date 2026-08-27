@@ -133,6 +133,9 @@ function Export-ResultsJson {
             }
             Summary = (Get-JsonSummaryBlock -Results $Results)
             Footprint           = $script:State.Footprint
+            # Phase B2: capability graph + grouped insights (read-only modeling;
+            # $null for runs where the model was not built).
+            CapabilityModel     = $script:State.CapabilityModel
             ExecutedChecks      = $script:State.ExecutedChecks
             Performance         = (Get-PerformanceSummary -Top 10)
             Findings            = $findingsForExport

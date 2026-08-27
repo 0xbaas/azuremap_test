@@ -261,13 +261,21 @@ Describe "Safety grep - no key/secret/content retrieval in runtime code" {
 
     It "never invokes listKeys / listSecrets actions" {
         foreach ($f in $script:runtimeFiles) {
-            $code = (Get-CodeLines -Path $f.FullName) -join "`n"
-            # The RBAC reference in StorageKey.ps1 mentions the permission name in a
-            # comment only; guard against actual call syntax / ARM action paths.
-            $code | Should -Not -Match '/listKeys\b'
-            $code | Should -Not -Match '/listSecrets\b'
-            $code | Should -Not -Match '\blistKeys\s*/action'
-            $code | Should -Not -Match '\blistSecrets\s*/action'
+            $codeLines = @(Get-CodeLines -Path $f.FullName)
+            # Phase B2 distinction: static single-quoted permission/action strings
+            # used for read-only capability modeling (e.g. the key-list action name
+            # in a role-definition Actions comparison, or the RBAC reference in
+            # StorageKey.ps1) are SAFE. Anything outside a quoted literal - path
+            # construction, SDK/REST invocation - remains forbidden.
+            $stripped = ($codeLines | ForEach-Object { $_ -replace "'[^']*'", "''" }) -join "`n"
+            $stripped | Should -Not -Match 'listKeys'
+            $stripped | Should -Not -Match 'listSecrets'
+            # Even inside quotes, an invocation cmdlet on the same line is forbidden.
+            foreach ($line in $codeLines) {
+                if ("$line" -match 'listKeys|listSecrets') {
+                    $line | Should -Not -Match 'Invoke-AzRestMethod|Invoke-RestMethod|Invoke-WebRequest|Invoke-AzureCommand'
+                }
+            }
         }
     }
 

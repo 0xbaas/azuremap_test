@@ -598,6 +598,23 @@ function Test-CustomRoles {
             # scope and below, so a client-side RoleDefinitionId filter is equivalent.
             $subAssignments = @(Get-SubscriptionRBACAssignments -SubscriptionId $sub.Id -SubscriptionName $sub.Name)
 
+            # Phase B2: retain slim projections of the already-fetched custom role
+            # definitions (Actions/DataActions included) so the capability model can
+            # reason about what custom roles grant (e.g. storage key-retrieval
+            # permission) without any additional API calls. In-memory only.
+            if ($null -ne $customRoles) {
+                $roleProjections = [System.Collections.Generic.List[object]]::new()
+                foreach ($role in @($customRoles)) {
+                    $roleProjections.Add([PSCustomObject]@{
+                        RoleGuid    = ("$($role.Id)" -split '/')[-1]
+                        RoleName    = "$($role.Name)"
+                        Actions     = @($role.Actions)
+                        DataActions = @($role.DataActions)
+                    })
+                }
+                $script:State.Cache.RoleDefinitions["$($sub.Id)"] = $roleProjections
+            }
+
             foreach ($role in $customRoles) {
                 $dangerousActions = @()
                 foreach ($action in $role.Actions) {

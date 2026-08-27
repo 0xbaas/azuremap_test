@@ -101,6 +101,39 @@ Timing (State.Timing, Get-PerformanceSummary in Core/Logging.ps1):
 
 
 
+## Phase B2: capability / attack-path modeling (read-only)
+
+Core/CapabilityModel.ps1 builds a capability graph + grouped insights AFTER
+assessment (azuremap.ps1 step 9.5, timed as the CapabilityModel phase) from
+already-collected data only: finding evidence (State.Results), the inventory
+cache (State.Cache.ResourceLists), the RBAC cache (State.Cache.RBACAssignments)
+and the footprint. It performs NO Azure/Graph API calls, never retrieves
+keys/secrets/SAS/tokens/content and never executes write actions (enforced by
+source-grep tests).
+
+- Model: Nodes (Id/Type/Name/Scope/ResourceType/Sensitivity/Exposure), Edges
+  (From/To/Type/Capability/SourceCheckIds/Confidence/Severity/Reason, deduped
+  on From|To|Capability), Insights (grouped, severity-sorted, ids CAP-001..).
+- 7 builders: storage key capability (Shared Key + key-retrieval RBAC -
+  well-known role names OR custom roles whose cached definition Actions grant
+  the key-list action, matched statically via Test-CapabilityKeyListCapableActions;
+  modeled only, never invoked), public storage exposure combination, public
+  workload + privileged identity, managed identity blast radius, Key Vault
+  exposure combination, network exfiltration paths, monitoring gaps on exposed
+  critical resources. Custom role definitions fetched by IDENTITY-005 are
+  retained in State.Cache.RoleDefinitions (in-memory only) for this matching.
+- Severity discipline: CRITICAL only for combined confirmed high-impact
+  paths; single-condition evidence never escalates. Confidence: High =
+  directly confirmed by collected metadata, Medium = inferred from
+  role/scope combination.
+- Caps: 100 insights / 500 nodes / 1000 edges / 50 impacted resources per
+  insight (full count preserved). Truncation counters in Limits.
+- Output: CLI shows top 5 insights only (Core/Console.ps1); HTML gains a
+  Capability Insights section (insight cards + capped graph table); JSON
+  gains a top-level CapabilityModel block. CSV unchanged.
+
+
+
 ## Phase B1: Status x Coverage contract
 
 Canonical check statuses (Core/RunStatus.ps1):

@@ -226,6 +226,95 @@ function ConvertTo-HtmlEvidenceTable {
     return ($truncatedNote + $sb.ToString())
 }
 
+function Add-HtmlCapabilitySection {
+    <#
+    .SYNOPSIS
+        Appends the Phase B2 "Capability insights" section to the HTML report.
+    .DESCRIPTION
+        Renders the top 25 grouped capability insights as collapsible cards
+        (severity, confidence, affected resources, why it matters, source
+        checks, evidence summary, recommended review) plus a capped graph
+        table of modeled capability edges. The model is read-only: it was
+        built from already-collected metadata without retrieving keys,
+        secrets, tokens or content.
+    .PARAMETER StringBuilder
+        The report StringBuilder to append to.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [System.Text.StringBuilder]$StringBuilder
+    )
+
+    $model = $script:State.CapabilityModel
+    if (-not $model) { return }
+
+    $sb = $StringBuilder
+    [void]$sb.Append('<section id="capability"><h2>Capability Insights</h2>')
+    [void]$sb.Append('<p class="muted">Read-only capability / attack-path modeling over already-collected metadata. These insights connect findings into higher-order risk (public exposure + privileged identity, shared key + key-capable RBAC, detection gaps on exposed resources). Nothing here is exploitation: no keys, secrets, tokens or content were retrieved, and no write actions were performed.</p>')
+
+    $insights = @($model.Insights)
+    if ($insights.Count -eq 0) {
+        [void]$sb.Append('<p class="muted">No capability insights were modeled from this run''s findings.</p>')
+    } else {
+        [void]$sb.Append("<div class=""cards""><div class=""card""><div class=""num"">$($insights.Count)</div><div class=""lbl"">Capability Insights</div></div>")
+        [void]$sb.Append("<div class=""card""><div class=""num"">$($model.Summary.NodeCount)</div><div class=""lbl"">Graph Nodes</div></div>")
+        [void]$sb.Append("<div class=""card""><div class=""num"">$($model.Summary.EdgeCount)</div><div class=""lbl"">Graph Edges</div></div>")
+        if ($model.Summary.HighestSeverity) {
+            [void]$sb.Append("<div class=""card""><div class=""num"">$(Get-HtmlSeverityPill -Severity $model.Summary.HighestSeverity)</div><div class=""lbl"">Highest Insight Severity</div></div>")
+        }
+        [void]$sb.Append('</div>')
+
+        $shown = @($insights | Select-Object -First 25)
+        foreach ($ci in $shown) {
+            $checks = Escape-HtmlContent -Text (@($ci.SourceCheckIds) -join ', ')
+            [void]$sb.Append("<details><summary>$(Get-HtmlSeverityPill -Severity $ci.Severity) $(Escape-HtmlContent -Text $ci.Title) <span class=""muted"">($(Escape-HtmlContent -Text $ci.Id) &middot; $($ci.ImpactedResourceCount) $(Escape-HtmlContent -Text $ci.ResourceUnit) &middot; confidence $(Escape-HtmlContent -Text $ci.Confidence))</span></summary>")
+            [void]$sb.Append('<div class="body"><dl class="kv">')
+            [void]$sb.Append("<dt>Why it matters</dt><dd>$(Escape-HtmlContent -Text $ci.Description)</dd>")
+            if ($ci.EvidenceSummary)   { [void]$sb.Append("<dt>Evidence summary</dt><dd>$(Escape-HtmlContent -Text $ci.EvidenceSummary)</dd>") }
+            [void]$sb.Append("<dt>Source checks</dt><dd>$checks</dd>")
+            if ($ci.RecommendedReview) { [void]$sb.Append("<dt>Recommended review</dt><dd>$(Escape-HtmlContent -Text $ci.RecommendedReview)</dd>") }
+            [void]$sb.Append('</dl>')
+            $res = @($ci.ImpactedResources)
+            if ($res.Count -gt 0) {
+                [void]$sb.Append('<h3>Affected resources</h3><ul>')
+                foreach ($line in @($res | Select-Object -First 25)) {
+                    [void]$sb.Append("<li>$(Escape-HtmlContent -Text $line)</li>")
+                }
+                [void]$sb.Append('</ul>')
+                if ($res.Count -gt 25) { [void]$sb.Append("<p class=""trunc-note"">Showing 25 of $($res.Count) listed resources; see JSON export for the full insight.</p>") }
+                if ([int]$ci.ImpactedResourceCount -gt $res.Count) { [void]$sb.Append("<p class=""trunc-note"">Insight covers $($ci.ImpactedResourceCount) $(Escape-HtmlContent -Text $ci.ResourceUnit) in total; the list above is capped.</p>") }
+            }
+            [void]$sb.Append('</div></details>')
+        }
+        if ($insights.Count -gt 25) {
+            [void]$sb.Append("<p class=""trunc-note"">Showing top 25 of $($insights.Count) insights. See the JSON export (CapabilityModel) for the complete set.</p>")
+        }
+    }
+
+    # Graph table (capped): modeled capability edges.
+    $edges = @($model.Edges)
+    if ($edges.Count -gt 0) {
+        $nodeNames = @{}
+        foreach ($n in @($model.Nodes)) { $nodeNames["$($n.Id)"] = "$($n.Name)" }
+        $edgeRows = @($edges | Select-Object -First 200)
+        [void]$sb.Append("<h3>Capability Graph <span class=""muted"">($($edges.Count) edge(s), top 200 shown)</span></h3>")
+        [void]$sb.Append('<table><thead><tr><th>Source</th><th>Capability</th><th>Target</th><th>Supporting findings</th><th>Confidence</th><th>Severity</th></tr></thead><tbody>')
+        foreach ($e in $edgeRows) {
+            $fromName = $(if ($nodeNames.ContainsKey("$($e.From)")) { $nodeNames["$($e.From)"] } else { "$($e.From)" })
+            $toName   = $(if ($nodeNames.ContainsKey("$($e.To)"))   { $nodeNames["$($e.To)"] }   else { "$($e.To)" })
+            $reason   = $(if ($e.Reason) { " $(ConvertTo-HtmlCompactValue -Value $e.Reason -MaxLength 160)" } else { '' })
+            [void]$sb.Append("<tr><td>$(Escape-HtmlContent -Text $fromName)</td><td>$(ConvertTo-HtmlCompactValue -Value $e.Capability -MaxLength 120)$reason</td><td>$(Escape-HtmlContent -Text $toName)</td><td>$(Escape-HtmlContent -Text (@($e.SourceCheckIds) -join ', '))</td><td>$(Escape-HtmlContent -Text $e.Confidence)</td><td>$(Get-HtmlSeverityPill -Severity $e.Severity)</td></tr>")
+        }
+        [void]$sb.Append('</tbody></table>')
+        if ($edges.Count -gt 200) { [void]$sb.Append("<p class=""trunc-note"">Graph capped at 200 of $($edges.Count) edges; see the JSON export for the full model.</p>") }
+    }
+    if ($model.Limits -and @($model.Limits.Notes).Count -gt 0) {
+        [void]$sb.Append("<p class=""muted"">Model limits: $(Escape-HtmlContent -Text (@($model.Limits.Notes) -join ' | '))</p>")
+    }
+    [void]$sb.Append('</section>')
+}
+
 function Export-ResultsHtml {
     <#
     .SYNOPSIS
@@ -384,7 +473,7 @@ footer .brand { color:var(--brand); font-weight:600; }
         [void]$sb.Append("<header class=""topbar""><h1>$(Escape-HtmlContent -Text $script:State.Metadata.ToolName) <span class=""ver"">v$($script:State.Metadata.Version)</span></h1>")
         [void]$sb.Append('<div class="tagline">Azure / Entra Security Assessment &middot; <span class="brand">Created by BAAS &middot; 0xbaas.com</span></div>')
         [void]$sb.Append("<div class=""meta""><span>Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')</span><span>Account: $account</span><span>Tenant: $tenant</span><span>Mode: $mode</span><span>Data-plane checks: $dpMode</span></div></header>")
-        [void]$sb.Append('<nav><a href="#exec">Executive Summary</a><a href="#coverage">Coverage</a><a href="#findings">Findings</a><a href="#components">Affected Components</a><a href="#checks">Per-Check Detail</a><a href="#attention">Not Evaluated / Errors</a></nav>')
+        [void]$sb.Append('<nav><a href="#exec">Executive Summary</a><a href="#coverage">Coverage</a><a href="#findings">Findings</a><a href="#components">Affected Components</a><a href="#capability">Capability Insights</a><a href="#checks">Per-Check Detail</a><a href="#attention">Not Evaluated / Errors</a></nav>')
         [void]$sb.Append('<main>')
 
         # Result integrity: never present a clean-looking report when the
@@ -620,6 +709,9 @@ footer .brand { color:var(--brand); font-weight:600; }
             }
         }
         [void]$sb.Append('</section>')
+
+        # ---- 4.5 Capability insights (Phase B2) ----
+        Add-HtmlCapabilitySection -StringBuilder $sb
 
         # ---- 5. Per-check sections ----
         [void]$sb.Append('<section id="checks"><h2>Per-Check Detail</h2>')

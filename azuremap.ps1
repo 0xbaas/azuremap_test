@@ -334,6 +334,16 @@ try {
         Write-AuditLog -Message "Invoke-AuditChecks not found; check execution skipped." -Level WARN
     }
 
+    # 9.5 Capability modeling (Phase B2): read-only relationship modeling over
+    #     already-collected findings, evidence and in-memory caches. Performs
+    #     NO Azure/Graph API calls and never retrieves keys/secrets/tokens or
+    #     content; failures degrade to a skipped builder, never a failed run.
+    if (Get-Command -Name "Build-CapabilityModel" -ErrorAction SilentlyContinue) {
+        $capStart = Get-Date
+        $script:State.CapabilityModel = Build-CapabilityModel
+        $script:State.Timing.Phases['CapabilityModel'] = [Math]::Round(((Get-Date) - $capStart).TotalSeconds, 1)
+    }
+
     # 10. Report phase
     Show-AuditSummary
 }

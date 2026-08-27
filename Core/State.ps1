@@ -58,6 +58,10 @@ function Initialize-AuditState {
         # Environment footprint (Core/Footprint.ps1): subscriptions/RGs/resources/
         # resource-type counts. $null until the pre-scan runs; drives applicability.
         Footprint = $null
+        # Phase B2 capability model (Core/CapabilityModel.ps1): nodes/edges/
+        # insights built AFTER assessment from already-collected data only.
+        # $null until Build-CapabilityModel runs; consumed by JSON/HTML/CLI.
+        CapabilityModel = $null
         # Applicability/error plumbing for the per-check CLI summary:
         # CurrentCheckId is set while a check executes; CheckErrors aggregates
         # normalized WARN/ERROR messages per check (message -> count) so the CLI
@@ -125,6 +129,11 @@ function Initialize-AuditState {
         Cache = @{
             Subscriptions   = $null
             RBACAssignments = @{}
+            # Per-subscription custom role definitions as fetched by IDENTITY-005
+            # (Get-AzRoleDefinition -Custom), retained for read-only capability
+            # modeling (Phase B2): key "<subscriptionId>" -> slim projections
+            # @{ RoleGuid; RoleName; Actions; DataActions }. In-memory only.
+            RoleDefinitions = @{}
             # Per-run inventory cache (Core/InventoryCache.ps1): key
             # "<subscriptionId>|<Kind>" -> @{ Items; ProvenEmpty; Unavailable }.
             # In-memory only, cleared at end of run; never written to disk.
