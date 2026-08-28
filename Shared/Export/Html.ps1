@@ -430,6 +430,8 @@ th, td { border:1px solid var(--line); padding:8px 10px; text-align:left; vertic
 th { background:var(--panel2); font-weight:600; }
 tbody tr:nth-child(even) { background:rgba(127,127,127,.06); }
 tbody tr:hover { background:rgba(56,168,220,.08); }
+td a.comp-link { color:var(--accent); text-decoration:none; font-weight:600; }
+td a.comp-link:hover { text-decoration:underline; }
 .pill { display:inline-block; padding:2px 10px; border-radius:11px; font-size:.78rem; font-weight:700; white-space:nowrap; }
 .st-pass { background:rgba(95,191,122,.16); color:var(--pass); border:1px solid var(--pass); }
 .st-fail { background:rgba(224,93,93,.16); color:var(--fail); border:1px solid var(--fail); }
@@ -663,16 +665,21 @@ footer .brand { color:var(--brand); font-weight:600; }
         # (CheckId+Severity+Service+Finding); per-subscription rows stay in
         # the JSON/CSV exports.
         $groupedFindings = @(Group-HtmlFindings -Findings $findingGroups)
+        # One sorted view shared by the Findings Overview rows and the Affected
+        # Components blocks so per-row anchors (#comp-N) line up deterministically.
+        $sortedFindings = @($groupedFindings | Sort-Object { $sevOrder["$($_.Severity)".ToUpper()] }, Service, CheckId)
         [void]$sb.Append('<section id="findings"><h2>Findings Overview</h2>')
         if ($groupedFindings.Count -eq 0) {
             [void]$sb.Append('<p class="muted">No findings with affected resources were recorded. See Coverage Summary for evaluation status per check.</p>')
         } else {
             [void]$sb.Append('<div class="filterbar"><input id="fFilter" type="text" placeholder="Filter findings..."><select id="fSev"><option value="">All severities</option><option>CRITICAL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option><option>INFO</option></select></div>')
             [void]$sb.Append('<table id="findingsTable"><thead><tr><th>Severity</th><th>Check</th><th>Service</th><th>Finding</th><th>Count</th><th>Status</th><th>Confidence</th><th>Coverage</th><th>Summary</th><th>Recommendation</th></tr></thead><tbody>')
-            foreach ($f in ($groupedFindings | Sort-Object { $sevOrder["$($_.Severity)".ToUpper()] }, Service, CheckId)) {
+            $gi = 0
+            foreach ($f in $sortedFindings) {
                 $covState = if ($f.PartialEvaluation) { 'Partial' } elseif ($f.CompleteEvaluation) { 'Complete' } else { '' }
                 $fSum = if ($f.SummaryText) { $f.SummaryText } elseif ($f.CoverageSummary) { $f.CoverageSummary } else { '' }
-                $countCell = "$($f.Count)"
+                $countCell = "<a href=""#comp-$gi"" class=""comp-link"">View $($f.Count) affected</a>"
+                $gi++
                 if ($f.SubscriptionSpan -gt 1) { $countCell += "<div class=""muted"">across $($f.SubscriptionSpan) subscriptions</div>" }
                 [void]$sb.Append("<tr data-sev=""$("$($f.Severity)".ToUpper())"">")
                 [void]$sb.Append("<td>$(Get-HtmlSeverityPill -Severity $f.Severity)</td>")
@@ -696,7 +703,8 @@ footer .brand { color:var(--brand); font-weight:600; }
         if ($groupedFindings.Count -eq 0) {
             [void]$sb.Append('<p class="muted">No affected components recorded.</p>')
         } else {
-            foreach ($f in ($groupedFindings | Sort-Object { $sevOrder["$($_.Severity)".ToUpper()] }, Service, CheckId)) {
+            $ci = 0
+            foreach ($f in $sortedFindings) {
                 $badges = ''
                 if ($f.DataPlaneRequired)        { $badges += '<span class="badge on">data-plane required</span>' }
                 if ($f.ManualValidationRequired) { $badges += '<span class="badge on">manual validation</span>' }
@@ -704,7 +712,8 @@ footer .brand { color:var(--brand); font-weight:600; }
                 if ($f.PartialEvaluation)        { $badges += '<span class="badge on">partial coverage - may be incomplete</span>' }
                 $scopeNote = ''
                 if ($f.SubscriptionSpan -gt 1) { $scopeNote = " &middot; $($f.SubscriptionSpan) subscriptions" }
-                [void]$sb.Append("<details><summary>$(Get-HtmlSeverityPill -Severity $f.Severity) $(Escape-HtmlContent -Text $f.Finding) <span class=""muted"">($(Escape-HtmlContent -Text $f.CheckId) &middot; $($f.Count) affected$scopeNote)</span>$badges</summary>")
+                [void]$sb.Append("<details id=""comp-$ci""><summary>$(Get-HtmlSeverityPill -Severity $f.Severity) $(Escape-HtmlContent -Text $f.Finding) <span class=""muted"">($(Escape-HtmlContent -Text $f.CheckId) &middot; $($f.Count) affected$scopeNote)</span>$badges</summary>")
+                $ci++
                 [void]$sb.Append('<div class="body">')
                 [void]$sb.Append($(ConvertTo-HtmlEvidenceTable -Evidence $f.Evidence))
                 if ($f.Remediation) { [void]$sb.Append("<p><strong>Recommendation:</strong> $(ConvertTo-HtmlCompactValue -Value $f.Remediation -MaxLength 400)</p>") }

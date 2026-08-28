@@ -395,6 +395,28 @@ Describe "Exports preserve explicit status and coverage" {
         # data-plane badge visible
         $html | Should -Match 'data-plane required'
     }
+
+    It "Findings Overview rows link to their Affected Components block via matching #comp-N anchors" {
+        Write-Finding -Severity 'HIGH' -Status 'FAIL' -Message 'another risky thing' -Count 3 `
+                      -Data @([PSCustomObject]@{ Name = 'res3' }) -Service 'Network' -CheckId 'B1-EXP3'
+        $out = Join-Path $TestDrive 'anchors.html'
+        Export-ResultsHtml -Results $script:State.Results -OutputPath $out | Out-Null
+        $html = Get-Content $out -Raw
+
+        # every findings row link has a matching components anchor (2 failing groups here)
+        $linkIdx   = @([regex]::Matches($html, 'href="#comp-(\d+)"') | ForEach-Object { $_.Groups[1].Value } | Sort-Object)
+        $anchorIdx = @([regex]::Matches($html, 'id="comp-(\d+)"')   | ForEach-Object { $_.Groups[1].Value } | Sort-Object)
+        ($linkIdx -join ',')   | Should -Be '0,1'
+        ($anchorIdx -join ',') | Should -Be '0,1'
+
+        # link text carries the real count
+        $html | Should -Match 'View 2 affected'
+        $html | Should -Match 'View 3 affected'
+
+        # CRITICAL sorts first: comp-0 is the CRITICAL group in both sections
+        $compBlock = $html.Substring($html.IndexOf('id="comp-0"'), 400)
+        $compBlock | Should -Match 'risky thing'
+    }
 }
 
 
