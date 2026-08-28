@@ -41,6 +41,9 @@
 .PARAMETER EntraOnly
     DEPRECATED: prints guidance to use entramap.ps1 and stops before any
     Azure work.
+.PARAMETER ReportLayout
+    HTML report layout: 'Classic' (default) or the opt-in 'Pentester'
+    dashboard layout. JSON/CSV exports are unaffected.
 #>
 [CmdletBinding()]
 param(
@@ -70,7 +73,10 @@ param(
     [switch]$IncludeDataPlane,
     [switch]$NoColor,
     [switch]$RedactSensitive,
-    [switch]$RedactPublicIps
+    [switch]$RedactPublicIps,
+
+    [ValidateSet('Classic', 'Pentester')]
+    [string]$ReportLayout = 'Classic'
 )
 
 # NOTE: Version 1.0 (not Latest). AzureMap uses PowerShell 7-style soft member
@@ -168,6 +174,7 @@ try {
     $script:State.Config.NoColor       = $NoColor.IsPresent
     $script:State.Config.RedactSensitive = $RedactSensitive.IsPresent
     $script:State.Config.RedactPublicIps = $RedactPublicIps.IsPresent
+    $script:State.Config.ReportLayout  = $ReportLayout
     if ($DebugOutput) { $DebugPreference = 'Continue' }
 
     # 2. Banner

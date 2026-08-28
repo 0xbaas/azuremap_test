@@ -34,7 +34,10 @@ param(
     [switch]$DetailedSummary,
     [switch]$NoColor,
     [switch]$RedactSensitive,
-    [switch]$RedactPublicIps
+    [switch]$RedactPublicIps,
+
+    [ValidateSet('Classic', 'Pentester')]
+    [string]$ReportLayout = 'Classic'
 )
 
 & (Join-Path $PSScriptRoot 'Products\EntraMap\entramap.ps1') @PSBoundParameters

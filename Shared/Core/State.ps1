@@ -119,6 +119,9 @@ function Initialize-AuditState {
             IncludeDataPlane = $false
             RedactSensitive = $false
             RedactPublicIps = $false
+            # HTML report layout: 'Classic' (default, byte-stable) or the opt-in
+            # 'Pentester' dashboard layout (Shared/Export/HtmlPentester.ps1).
+            ReportLayout   = 'Classic'
 
             RBACSeverity = @{
                 "Owner"                        = @{ Root = "CRITICAL"; ManagementGroup = "CRITICAL"; Subscription = "HIGH";   ResourceGroup = "MEDIUM" }

@@ -32,6 +32,9 @@
     Skip Azure PowerShell module dependency validation.
 .PARAMETER UseGraphBeta
     Use the Microsoft Graph beta endpoint for Entra checks.
+.PARAMETER ReportLayout
+    HTML report layout: 'Classic' (default) or the opt-in 'Pentester'
+    dashboard layout. JSON/CSV exports are unaffected.
 #>
 [CmdletBinding()]
 param(
@@ -57,7 +60,10 @@ param(
     [switch]$DetailedSummary,
     [switch]$NoColor,
     [switch]$RedactSensitive,
-    [switch]$RedactPublicIps
+    [switch]$RedactPublicIps,
+
+    [ValidateSet('Classic', 'Pentester')]
+    [string]$ReportLayout = 'Classic'
 )
 
 # NOTE: Version 1.0 (not Latest). EntraMap uses PowerShell 7-style soft member
@@ -155,6 +161,7 @@ try {
     $script:State.Config.NoColor       = $NoColor.IsPresent
     $script:State.Config.RedactSensitive = $RedactSensitive.IsPresent
     $script:State.Config.RedactPublicIps = $RedactPublicIps.IsPresent
+    $script:State.Config.ReportLayout  = $ReportLayout
     if ($DebugOutput) { $DebugPreference = 'Continue' }
 
     # 2. Banner

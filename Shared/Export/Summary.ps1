@@ -38,7 +38,13 @@ function Show-AuditSummary {
             }
             "HTML" {
                 if ($script:State.Config.GenerateHTMLReport) {
-                    $htmlFile = Export-ResultsHtml -Results $results -OutputPath "$baseName.html"
+                    # Opt-in Pentester dashboard layout (Report UX v2); Classic
+                    # remains the default and is byte-unchanged.
+                    if ($script:State.Config.ReportLayout -eq 'Pentester') {
+                        $htmlFile = Export-ResultsHtmlPentester -Results $results -OutputPath "$baseName.html"
+                    } else {
+                        $htmlFile = Export-ResultsHtml -Results $results -OutputPath "$baseName.html"
+                    }
                     $createdFiles.Add($htmlFile)
                 }
             }

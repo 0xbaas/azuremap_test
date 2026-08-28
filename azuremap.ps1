@@ -38,7 +38,10 @@ param(
     [switch]$IncludeDataPlane,
     [switch]$NoColor,
     [switch]$RedactSensitive,
-    [switch]$RedactPublicIps
+    [switch]$RedactPublicIps,
+
+    [ValidateSet('Classic', 'Pentester')]
+    [string]$ReportLayout = 'Classic'
 )
 
 & (Join-Path $PSScriptRoot 'Products\AzureMap\azuremap.ps1') @PSBoundParameters
