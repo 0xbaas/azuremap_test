@@ -251,6 +251,14 @@ function New-AzureMapFinding {
         [string]$Message,
 
         [int]$Count = 0,
+        # What Count actually enumerates (count semantics standardization).
+        # UniqueResources = distinct resources; Containers / RoleAssignments =
+        # sub-resource collections; RiskSignals = individual risk observations
+        # (one resource may contribute several); Observations = informational
+        # notes; NotEvaluatedItems = items that could NOT be evaluated (never
+        # counted as affected). Adding a property is schema-safe; renaming is not.
+        [ValidateSet("", "UniqueResources", "Containers", "RoleAssignments", "RiskSignals", "Observations", "NotEvaluatedItems")]
+        [string]$CountType = "UniqueResources",
         [object]$Data,
         [string]$Service,
         [string]$Remediation,
@@ -402,6 +410,7 @@ function New-AzureMapFinding {
         Severity        = $Severity
         Finding         = $Message
         Count           = $Count
+        CountType       = $CountType
         EvidenceCount   = $evidenceCount
         References      = @($References)
         Status          = if ($Status) { $Status } else { if ($Count -gt 0) { 'FAIL' } else { 'PASS' } }
@@ -502,6 +511,8 @@ function Write-Finding {
         [string]$Message,
 
         [int]$Count = 0,
+        [ValidateSet("", "UniqueResources", "Containers", "RoleAssignments", "RiskSignals", "Observations", "NotEvaluatedItems")]
+        [string]$CountType = "UniqueResources",
         [object]$Data,
         [string]$Service,
         [string]$Remediation,
@@ -560,7 +571,7 @@ function Write-Finding {
         return
     }
 
-    $finding = New-AzureMapFinding -Severity $Severity -Message $Message -Count $Count -Data $Data -Service $Service `
+    $finding = New-AzureMapFinding -Severity $Severity -Message $Message -Count $Count -CountType $CountType -Data $Data -Service $Service `
         -Remediation $Remediation -Exclusions $Exclusions -SubscriptionId $SubscriptionId `
         -SubscriptionName $SubscriptionName -ResourceId $ResourceId -ResourceName $ResourceName `
         -Tags $Tags -Category $Category -Provider $Provider -CheckId $CheckId `

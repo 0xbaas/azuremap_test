@@ -8,6 +8,7 @@
 #   Test-StorageAdvancedSecurity      STORAGE-003
 #   Test-StorageAnonymousBlobAccess   STORAGE-004
 #   Test-StorageExfiltrationVectors   STORAGE-005
+#   Test-StorageDoubleEncryption      STORAGE-007
 #   Register-AzureStorageChecks
 #
 # Correctness rules (why storage was under-reporting):
@@ -317,7 +318,7 @@ function Test-StorageSharedKeyAccess {
     $evidence = if ($findings.Count -gt 0) { $findings } else { $notEval }
     Write-Finding -Severity $severity -Status $cov.Status `
                   -Message "Storage accounts allowing shared key authentication (enabled or unspecified)" `
-                  -Count $findings.Count -Data $evidence -Service "Storage" -CheckId "STORAGE-001" `
+                  -Count $findings.Count -CountType "UniqueResources" -Data $evidence -Service "Storage" -CheckId "STORAGE-001" `
                   -Remediation $remediation -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" `
                   @covParams
 
@@ -326,7 +327,7 @@ function Test-StorageSharedKeyAccess {
     if ($notEval.Count -gt 0 -and $findings.Count -gt 0) {
         Write-Finding -Severity "HIGH" -Status "NOTEVALUATED" -CheckId "STORAGE-001" `
                       -Message "Shared key authentication could not be evaluated for one or more subscriptions (storage account collection failed)" `
-                      -Count $notEval.Count -Data $notEval -Service "Storage" `
+                      -Count $notEval.Count -CountType "NotEvaluatedItems" -Data $notEval -Service "Storage" `
                       -Remediation "Ensure the audit identity has Microsoft.Storage/storageAccounts/read on the subscription and re-run." `
                       -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple"
     }
@@ -453,14 +454,14 @@ function Test-StoragePublicAccess {
     $evidence = if ($exposed.Count -gt 0) { $exposed } else { $notEval }
     Write-Finding -Severity $severity -Status $cov.Status `
                   -Message "Storage accounts with public network exposure, blob public access, or unverified firewall" `
-                  -Count $exposed.Count -Data $evidence -Service "Storage" -CheckId "STORAGE-002" `
+                  -Count $exposed.Count -CountType "UniqueResources" -Data $evidence -Service "Storage" -CheckId "STORAGE-002" `
                   -Remediation $remediation -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" `
                   @covParams
 
     if ($notEval.Count -gt 0 -and $exposed.Count -gt 0) {
         Write-Finding -Severity "HIGH" -Status "NOTEVALUATED" -CheckId "STORAGE-002" `
                       -Message "Public network access could not be evaluated for one or more subscriptions (storage account collection failed)" `
-                      -Count $notEval.Count -Data $notEval -Service "Storage" `
+                      -Count $notEval.Count -CountType "NotEvaluatedItems" -Data $notEval -Service "Storage" `
                       -Remediation "Ensure the audit identity has Microsoft.Storage/storageAccounts/read and re-run." `
                       -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple"
     }
@@ -475,7 +476,12 @@ function Test-StorageAdvancedSecurity {
 
     Write-Section -Title "STORAGE - ADVANCED SECURITY CHECKS" -Color "Yellow" -ProgressId $ProgressId
 
-    $findings = New-Object System.Collections.Generic.List[object]
+    # Property-specific lists: TLS and HTTPS-only findings are counted and
+    # reported separately from the broader weak-config list, so a summary can
+    # never claim "N risky" when only a few TLS issues exist.
+    $tlsIssues    = New-Object System.Collections.Generic.List[object]
+    $httpsIssues  = New-Object System.Collections.Generic.List[object]
+    $crossTenant  = New-Object System.Collections.Generic.List[object]
     $notEval  = New-Object System.Collections.Generic.List[object]
     $subsEvaluated = New-Object System.Collections.Generic.List[string]
     $subsSkipped   = New-Object System.Collections.Generic.List[string]
@@ -504,9 +510,9 @@ function Test-StorageAdvancedSecurity {
             $https = Get-StorageAccountProperty -Account $sa -Name 'EnableHttpsTrafficOnly'
             if ($null -eq $https) { $https = Get-StorageAccountProperty -Account $sa -Name 'SupportsHttpsTrafficOnly' }
             if ($https -eq $false) {
-                $findings.Add([PSCustomObject]@{
+                $httpsIssues.Add([PSCustomObject]@{
                     SubscriptionId=$sub.Id; SubscriptionName=$sub.Name; StorageAccount=$sa.StorageAccountName
-                    ResourceGroup=$sa.ResourceGroupName; Issue="Secure transfer (HTTPS-only) disabled"; Severity="HIGH"
+                    ResourceGroup=$sa.ResourceGroupName; Issue="Secure transfer (HTTPS-only) disabled"
                     ResourceId=$sa.Id; Tags=$sa.Tags
                 })
             }
@@ -514,47 +520,70 @@ function Test-StorageAdvancedSecurity {
             # Minimum TLS version. Absent/unspecified is risky (older accounts default to TLS1_0).
             $tls = Get-StorageAccountProperty -Account $sa -Name 'MinimumTlsVersion'
             if ($null -eq $tls -or ("$tls" -notin @("TLS1_2","TLS1_3"))) {
-                $findings.Add([PSCustomObject]@{
+                $tlsIssues.Add([PSCustomObject]@{
                     SubscriptionId=$sub.Id; SubscriptionName=$sub.Name; StorageAccount=$sa.StorageAccountName
                     ResourceGroup=$sa.ResourceGroupName; Issue="Minimum TLS version below 1.2 or unspecified"
-                    CurrentVersion=if ($null -eq $tls) { "Unspecified" } else { "$tls" }; Severity="HIGH"
+                    CurrentVersion=if ($null -eq $tls) { "Unspecified" } else { "$tls" }
                     ResourceId=$sa.Id; Tags=$sa.Tags
                 })
             }
 
             if ((Get-StorageAccountProperty -Account $sa -Name 'AllowCrossTenantReplication') -eq $true) {
-                $findings.Add([PSCustomObject]@{
+                $crossTenant.Add([PSCustomObject]@{
                     SubscriptionId=$sub.Id; SubscriptionName=$sub.Name; StorageAccount=$sa.StorageAccountName
-                    ResourceGroup=$sa.ResourceGroupName; Issue="Cross-tenant replication allowed"; Severity="MEDIUM"
+                    ResourceGroup=$sa.ResourceGroupName; Issue="Cross-tenant replication allowed"
                     ResourceId=$sa.Id; Tags=$sa.Tags
                 })
             }
         }
     }
 
-    $highFindings   = @($findings | Where-Object { $_.Severity -eq "HIGH" })
-    $mediumFindings = @($findings | Where-Object { $_.Severity -eq "MEDIUM" })
+    # Risky must be UNIQUE storage accounts - one account can carry several of
+    # these issues, so summing list counts would overstate the account total.
+    # NOTE: no @(...) around the generic Lists - PS 5.1 throws "Argument types
+    # do not match" on that coercion; enumerate them directly.
+    $issueTotal = $tlsIssues.Count + $httpsIssues.Count + $crossTenant.Count
+    $riskyNames = New-Object System.Collections.Generic.List[string]
+    foreach ($bucket in @($tlsIssues, $httpsIssues, $crossTenant)) {
+        foreach ($item in $bucket) {
+            $n = "$($item.StorageAccount)"
+            if ($n -and -not $riskyNames.Contains($n)) { $riskyNames.Add($n) }
+        }
+    }
+    $riskyAccounts = $riskyNames.Count
 
     $cov = New-StorageCoverage -Discovered $totalAccounts -Evaluated $totalAccounts -SkippedResources 0 `
         -CollectionFailures $notEval -SkippedSubscriptions $subsSkipped -EvaluatedSubscriptions $subsEvaluated `
-        -Risky $findings.Count
+        -Risky $riskyAccounts
+    if ($issueTotal -gt 0) {
+        $covText = if ($cov.CompleteEvaluation) { 'coverage complete.' } else { 'coverage partial; findings may be incomplete.' }
+        $cov.CoverageSummary = "$totalAccounts storage accounts evaluated; $issueTotal issue(s) " +
+            "($($tlsIssues.Count) TLS version, $($httpsIssues.Count) HTTPS-only disabled, $($crossTenant.Count) cross-tenant replication) " +
+            "across $riskyAccounts unique account(s); $covText"
+    }
     $covParams = New-StorageCoverageParams -Coverage $cov -Discovered $totalAccounts -Evaluated $totalAccounts `
         -SkippedResources 0 -SkippedSubscriptions $subsSkipped -EvaluatedSubscriptions $subsEvaluated `
         -ApiSources @('ARM Get-AzStorageAccount') -FindingType 'Misconfiguration'
 
-    if ($highFindings.Count -gt 0) {
-        Write-Finding -Severity "HIGH" -Status "FAIL" -Message "Storage accounts with security misconfigurations (HTTPS/TLS)" `
-                      -Count $highFindings.Count -Data $highFindings -Service "Storage" -CheckId "STORAGE-003" `
-                      -Remediation "Enable HTTPS-only and set minimum TLS 1.2." -Exclusions $Exclusions `
+    if ($tlsIssues.Count -gt 0) {
+        Write-Finding -Severity "HIGH" -Status "FAIL" -Message "Storage accounts with minimum TLS version below 1.2 or unspecified" `
+                      -Count $tlsIssues.Count -CountType "UniqueResources" -Data $tlsIssues -Service "Storage" -CheckId "STORAGE-003" `
+                      -Remediation "Set the minimum TLS version to 1.2." -Exclusions $Exclusions `
                       -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
     }
-    if ($mediumFindings.Count -gt 0) {
+    if ($httpsIssues.Count -gt 0) {
+        Write-Finding -Severity "HIGH" -Status "FAIL" -Message "Storage accounts with secure transfer (HTTPS-only) disabled" `
+                      -Count $httpsIssues.Count -CountType "UniqueResources" -Data $httpsIssues -Service "Storage" -CheckId "STORAGE-003" `
+                      -Remediation "Enable secure transfer (HTTPS-only)." -Exclusions $Exclusions `
+                      -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
+    }
+    if ($crossTenant.Count -gt 0) {
         Write-Finding -Severity "MEDIUM" -Status "FAIL" -Message "Storage accounts allowing cross-tenant replication" `
-                      -Count $mediumFindings.Count -Data $mediumFindings -Service "Storage" -CheckId "STORAGE-003" `
+                      -Count $crossTenant.Count -CountType "UniqueResources" -Data $crossTenant -Service "Storage" -CheckId "STORAGE-003" `
                       -Remediation "Disable cross-tenant replication unless required." -Exclusions $Exclusions `
                       -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
     }
-    if ($findings.Count -eq 0) {
+    if ($issueTotal -eq 0) {
         # B1: explicit coverage record - PASS (proven clean) / PARTIAL / NOTEVALUATED,
         # never silence. Carries the failure detail when nothing was risky.
         # A proven-empty scope (case 1) is reported at INFO severity.
@@ -566,10 +595,10 @@ function Test-StorageAdvancedSecurity {
                       -Remediation "Enable HTTPS-only and set minimum TLS 1.2." -Exclusions $Exclusions `
                       -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
     }
-    if ($notEval.Count -gt 0 -and $findings.Count -gt 0) {
+    if ($notEval.Count -gt 0 -and $issueTotal -gt 0) {
         Write-Finding -Severity "HIGH" -Status "NOTEVALUATED" -CheckId "STORAGE-003" `
                       -Message "Storage advanced security could not be evaluated for one or more subscriptions (collection failed)" `
-                      -Count $notEval.Count -Data $notEval -Service "Storage" `
+                      -Count $notEval.Count -CountType "NotEvaluatedItems" -Data $notEval -Service "Storage" `
                       -Remediation "Ensure Microsoft.Storage/storageAccounts/read and re-run." -Exclusions $Exclusions `
                       -SubscriptionId "Multiple" -SubscriptionName "Multiple"
     }
@@ -584,7 +613,24 @@ function Test-StorageAnonymousBlobAccess {
 
     Write-Section -Title "STORAGE ACCOUNTS - ANONYMOUS BLOB ACCESS" -Color "Red" -ProgressId $ProgressId
 
+    # Phase B3 hard gate: container enumeration is a DATA-PLANE operation and
+    # runs ONLY behind -IncludeDataPlane. The orchestrator normally skips this
+    # check when the switch is absent; when invoked directly without the opt-in,
+    # record NOTEVALUATED (never a clean PASS) and stop. Even when enabled, the
+    # evaluation is metadata-only: Entra/OAuth (data-plane RBAC) auth via the
+    # account's own context - NO account keys, NO SAS, NO blob content listing.
+    if (-not $script:State.Config.IncludeDataPlane) {
+        Write-Finding -Severity "INFO" -Status "NOTEVALUATED" -CheckId "STORAGE-004" `
+                      -Message "Anonymous blob access not evaluated: data-plane container enumeration requires -IncludeDataPlane (not reported as clean)" `
+                      -Count 0 -Data $null -Service "Storage" `
+                      -Remediation "Re-run with -IncludeDataPlane to enable metadata-only container public-access evaluation (Entra/OAuth data-plane auth only; never account keys or blob content)." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" `
+                      -DataPlaneRequired $true
+        return
+    }
+
     $findings = New-Object System.Collections.Generic.List[object]
+    $accountLevelAllowed = New-Object System.Collections.Generic.List[object]
     $notEval  = New-Object System.Collections.Generic.List[object]
     $subsEvaluated = New-Object System.Collections.Generic.List[string]
     $subsSkipped   = New-Object System.Collections.Generic.List[string]
@@ -640,10 +686,27 @@ function Test-StorageAnonymousBlobAccess {
                     if ($pa -and "$pa" -ne "Off") { $publicContainers += "$($container.Name) ($pa)" }
                 }
                 if ($publicContainers.Count -gt 0) {
+                    # CONFIRMED public container access (data-plane verified). The
+                    # account-level AllowBlobPublicAccess flag is only the enabling
+                    # control-plane signal; keep both on the evidence so the
+                    # distinction survives into the exports.
                     $findings.Add([PSCustomObject]@{
                         SubscriptionId=$sub.Id; SubscriptionName=$sub.Name; ResourceGroup=$sa.ResourceGroupName
                         StorageAccount=$sa.StorageAccountName; PublicContainersCount=$publicContainers.Count
                         PublicContainers=($publicContainers -join "; ")
+                        AccountAllowBlobPublicAccess=if ($null -eq $blob) { "Unspecified" } else { "$blob" }
+                        Confirmation="Data-plane confirmed"
+                    })
+                }
+                elseif ($blob -eq $true) {
+                    # Control-plane signal only: the account ALLOWS blob public
+                    # access, but data-plane enumeration confirmed no public
+                    # containers right now.
+                    $accountLevelAllowed.Add([PSCustomObject]@{
+                        SubscriptionId=$sub.Id; SubscriptionName=$sub.Name; ResourceGroup=$sa.ResourceGroupName
+                        StorageAccount=$sa.StorageAccountName
+                        AccountAllowBlobPublicAccess="$blob"
+                        Confirmation="Control-plane signal only; no public containers confirmed"
                     })
                 }
             }
@@ -659,8 +722,8 @@ function Test-StorageAnonymousBlobAccess {
         -FindingType 'Exposure' -DataPlaneRequired $true
 
     if ($findings.Count -gt 0) {
-        Write-Finding -Severity "CRITICAL" -Status "FAIL" -Message "Storage accounts with anonymous/public blob containers" `
-                      -Count $findings.Count -Data $findings -Service "Storage" -CheckId "STORAGE-004" `
+        Write-Finding -Severity "CRITICAL" -Status "FAIL" -Message "Storage accounts with CONFIRMED anonymous/public blob containers (data-plane verified)" `
+                      -Count $findings.Count -CountType "UniqueResources" -Data $findings -Service "Storage" -CheckId "STORAGE-004" `
                       -Remediation "Disable public access on the containers and on the account (AllowBlobPublicAccess = false)." `
                       -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
     }
@@ -675,10 +738,19 @@ function Test-StorageAnonymousBlobAccess {
                       -Remediation "Disable public access on the containers and on the account (AllowBlobPublicAccess = false)." `
                       -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
     }
+    if ($accountLevelAllowed.Count -gt 0) {
+        # Control-plane signal, distinct from the data-plane CONFIRMED finding
+        # above: public access is ALLOWED at account level but no public
+        # containers were confirmed by enumeration.
+        Write-Finding -Severity "LOW" -Status "FAIL" -Message "Storage accounts allowing blob public access at account level (control-plane signal; no public containers confirmed)" `
+                      -Count $accountLevelAllowed.Count -CountType "UniqueResources" -Data $accountLevelAllowed -Service "Storage" -CheckId "STORAGE-004" `
+                      -Remediation "Set AllowBlobPublicAccess = false unless anonymous container access is explicitly required." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple"
+    }
     if ($notEval.Count -gt 0 -and $findings.Count -gt 0) {
         Write-Finding -Severity "CRITICAL" -Status "NOTEVALUATED" -CheckId "STORAGE-004" `
                       -Message "Anonymous blob access could not be fully evaluated (container enumeration or collection failed); not reported as clean" `
-                      -Count $notEval.Count -Data $notEval -Service "Storage" `
+                      -Count $notEval.Count -CountType "NotEvaluatedItems" -Data $notEval -Service "Storage" `
                       -Remediation "Grant the audit identity Reader + Storage Blob Data Reader (or Storage Account Contributor for control-plane container listing) and re-run." `
                       -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple"
     }
@@ -814,19 +886,19 @@ function Test-StorageExfiltrationVectors {
 
     if ($critical.Count -gt 0) {
         Write-Finding -Severity "CRITICAL" -Status "FAIL" -Message "Storage accounts with public/unspecified access, shared key, and no firewall" `
-                      -Count $critical.Count -Data $critical -Service "Exfiltration" -CheckId "STORAGE-005" `
+                      -Count $critical.Count -CountType "UniqueResources" -Data $critical -Service "Exfiltration" -CheckId "STORAGE-005" `
                       -Remediation "Disable shared key, restrict public access, and enforce firewall rules." -Exclusions $Exclusions `
                       -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
     }
     if ($high.Count -gt 0) {
         Write-Finding -Severity "HIGH" -Status "FAIL" -Message "Storage accounts with long SAS policies or cross-tenant replication" `
-                      -Count $high.Count -Data $high -Service "Exfiltration" -CheckId "STORAGE-005" `
+                      -Count $high.Count -CountType "RiskSignals" -Data $high -Service "Exfiltration" -CheckId "STORAGE-005" `
                       -Remediation "Reduce SAS expiration and disable cross-tenant replication." -Exclusions $Exclusions `
                       -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
     }
     if ($medium.Count -gt 0) {
         Write-Finding -Severity "MEDIUM" -Status "FAIL" -Message "Storage accounts with trusted services bypass enabled" `
-                      -Count $medium.Count -Data $medium -Service "Exfiltration" -CheckId "STORAGE-005" `
+                      -Count $medium.Count -CountType "Observations" -Data $medium -Service "Exfiltration" -CheckId "STORAGE-005" `
                       -Remediation "Review trusted services bypass and restrict if not required." -Exclusions $Exclusions `
                       -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
     }
@@ -844,9 +916,119 @@ function Test-StorageExfiltrationVectors {
     if ($notEval.Count -gt 0 -and $riskyTotal -gt 0) {
         Write-Finding -Severity "CRITICAL" -Status "NOTEVALUATED" -CheckId "STORAGE-005" `
                       -Message "Data exfiltration vectors could not be evaluated for one or more subscriptions (collection failed); not reported as clean" `
-                      -Count $notEval.Count -Data $notEval -Service "Exfiltration" `
+                      -Count $notEval.Count -CountType "NotEvaluatedItems" -Data $notEval -Service "Exfiltration" `
                       -Remediation "Ensure Microsoft.Storage/storageAccounts/read and re-run." -Exclusions $Exclusions `
                       -SubscriptionId "Multiple" -SubscriptionName "Multiple"
+    }
+}
+
+function Test-StorageDoubleEncryption {
+    <#
+    .SYNOPSIS
+        STORAGE-007 - infrastructure (double) encryption. INFO/control-gap ONLY
+        when infrastructure encryption is explicitly not enabled; never
+        escalated. Azure Storage is ALWAYS encrypted at rest by default with
+        Microsoft-managed keys - this finding matters only where a baseline or
+        regulation requires double encryption. Unknown/absent property ->
+        NotEvaluated, never a misleading clean PASS.
+    #>
+    param(
+        [array]$Subscriptions,
+        [hashtable]$Exclusions,
+        [int]$ProgressId = 0
+    )
+
+    Write-Section -Title "STORAGE ACCOUNTS - INFRASTRUCTURE (DOUBLE) ENCRYPTION" -Color "Yellow" -ProgressId $ProgressId
+
+    $notEnabled = New-Object System.Collections.Generic.List[object]
+    $notEval    = New-Object System.Collections.Generic.List[object]
+    $subsEvaluated = New-Object System.Collections.Generic.List[string]
+    $subsSkipped   = New-Object System.Collections.Generic.List[string]
+    $totalAccounts = 0
+    $evaluatedAccounts = 0
+    $skippedResources = 0
+    $totalProcessed = 0
+
+    foreach ($sub in $Subscriptions) {
+        $totalProcessed++
+        Write-Progress -Activity "Checking storage double encryption" -Status "Subscription: $($sub.Name)" `
+                      -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) -Id $ProgressId
+
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind StorageAccounts
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { $subsSkipped.Add($sub.Name) }
+            else { $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name; Reason = 'Storage account collection failed' }) }
+            continue
+        }
+        $subsEvaluated.Add($sub.Name)
+        $totalAccounts += @($inv.Items).Count
+
+        foreach ($sa in $inv.Items) {
+            $enc = Get-StorageAccountProperty -Account $sa -Name 'Encryption'
+            $rie = $null
+            if ($enc -and ($enc.PSObject.Properties.Name -contains 'RequireInfrastructureEncryption')) {
+                $rie = $enc.RequireInfrastructureEncryption
+            }
+
+            if ($null -eq $rie) {
+                # Property absent/unknown on this API surface -> NotEvaluated,
+                # never silently treated as either enabled or disabled.
+                $notEval.Add([PSCustomObject]@{
+                    SubscriptionName = $sub.Name; StorageAccount = $sa.StorageAccountName
+                    Reason = 'Encryption.RequireInfrastructureEncryption property absent (older API surface)'
+                })
+                $skippedResources++
+                continue
+            }
+            $evaluatedAccounts++
+
+            if ($rie -eq $false) {
+                $notEnabled.Add([PSCustomObject]@{
+                    SubscriptionId   = $sub.Id
+                    SubscriptionName = $sub.Name
+                    ResourceGroup    = $sa.ResourceGroupName
+                    StorageAccount   = $sa.StorageAccountName
+                    RequireInfrastructureEncryption = "$rie"
+                    ResourceId       = $sa.Id
+                })
+            }
+        }
+    }
+
+    $cov = New-StorageCoverage -Discovered $totalAccounts -Evaluated $evaluatedAccounts -SkippedResources $skippedResources `
+        -CollectionFailures $notEval -SkippedSubscriptions $subsSkipped -EvaluatedSubscriptions $subsEvaluated `
+        -Risky $notEnabled.Count
+    $covParams = New-StorageCoverageParams -Coverage $cov -Discovered $totalAccounts -Evaluated $evaluatedAccounts `
+        -SkippedResources $skippedResources -SkippedSubscriptions $subsSkipped -EvaluatedSubscriptions $subsEvaluated `
+        -ApiSources @('ARM Get-AzStorageAccount') -FindingType 'ControlGap'
+
+    $infoText = 'Azure Storage data is still encrypted at rest by default with Microsoft-managed keys; infrastructure (double) encryption is a defense-in-depth control relevant only where a baseline or regulation explicitly requires it.'
+
+    if ($notEnabled.Count -gt 0) {
+        # INFO by design: control gap only, never escalated.
+        Write-Finding -Severity "INFO" -Status "FAIL" -CheckId "STORAGE-007" `
+                      -Message "Storage accounts without infrastructure (double) encryption - data is still encrypted at rest by default" `
+                      -Count $notEnabled.Count -CountType "UniqueResources" -Data $notEnabled -Service "Storage" `
+                      -SeverityReason "Control gap only, never escalated. $infoText" `
+                      -Remediation "No action required unless a baseline/regulation mandates double encryption; if required, it can only be enabled at account creation. $infoText" `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
+    }
+    else {
+        $severity = if ($cov.Severity) { $cov.Severity } else { 'INFO' }
+        $evidence = if ($notEval.Count -gt 0) { $notEval } else { $null }
+        Write-Finding -Severity $severity -Status $cov.Status -CheckId "STORAGE-007" `
+                      -Message "Storage accounts without infrastructure (double) encryption" `
+                      -Count 0 -Data $evidence -Service "Storage" `
+                      -SeverityReason $infoText `
+                      -Remediation "No action required unless a baseline/regulation mandates double encryption." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
+    }
+    if ($notEval.Count -gt 0 -and $notEnabled.Count -gt 0) {
+        Write-Finding -Severity "INFO" -Status "NOTEVALUATED" -CheckId "STORAGE-007" `
+                      -Message "Infrastructure encryption could not be fully evaluated (property absent or collection failed); not reported as clean" `
+                      -Count $notEval.Count -CountType "NotEvaluatedItems" -Data $notEval -Service "Storage" `
+                      -Remediation "Re-run with a current Az.Storage version so Encryption.RequireInfrastructureEncryption is returned." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple"
     }
 }
 
@@ -869,5 +1051,11 @@ function Register-AzureStorageChecks {
 
     Register-AuditCheck -CheckId "STORAGE-005" -Category "Azure" -Service "Storage" -Name "Data Exfiltration Vectors" `
                         -Function ${function:Test-StorageExfiltrationVectors} -DefaultSeverity "CRITICAL" `
+                        -RequiredModules @("Az.Accounts", "Az.Storage") -Phase "PerSubscription" -RequiredResourceTypes @('Microsoft.Storage/storageAccounts')
+
+    # INFO-only control gap by design (double encryption is defense in depth;
+    # storage is encrypted at rest by default) - never escalated.
+    Register-AuditCheck -CheckId "STORAGE-007" -Category "Azure" -Service "Storage" -Name "Infrastructure (Double) Encryption" `
+                        -Function ${function:Test-StorageDoubleEncryption} -DefaultSeverity "INFO" `
                         -RequiredModules @("Az.Accounts", "Az.Storage") -Phase "PerSubscription" -RequiredResourceTypes @('Microsoft.Storage/storageAccounts')
 }

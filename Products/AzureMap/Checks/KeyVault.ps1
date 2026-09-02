@@ -75,15 +75,26 @@ function Test-KeyVaultNetworkSecurity {
         [hashtable]$Exclusions,
         [int]$ProgressId = 0
     )
-    
+
     Write-Section -Title "KEY VAULT - NETWORK SECURITY & PROTECTION" -Color "Red" -ProgressId $ProgressId
-    
-    $publicNoFirewall = New-Object System.Collections.Generic.List[object]
-    $missingPurgeProtection = New-Object System.Collections.Generic.List[object]
-    $criticalNoPrivateEndpoint = New-Object System.Collections.Generic.List[object]
+
+    # Property-specific evidence lists. Every finding below carries ONLY the
+    # vaults matching its own property - no broad shared vault list is reused
+    # across findings. Unknown/unreadable properties are surfaced as
+    # NotEvaluated, never treated as clean.
+    $publicNetworkAccess      = New-Object System.Collections.Generic.List[object]  # (a) publicNetworkAccess enabled/unspecified
+    $firewallDefaultAllow     = New-Object System.Collections.Generic.List[object]  # (b) networkAcls.defaultAction = Allow
+    $publicNoFirewall         = New-Object System.Collections.Generic.List[object]  # (c) correlation: public + default Allow
+    $missingPurgeProtection   = New-Object System.Collections.Generic.List[object]  # (d) purge protection disabled
+    $criticalNoPrivateEndpoint = New-Object System.Collections.Generic.List[object] # (f) critical vault, no private endpoint
+    $noAuditLogging           = New-Object System.Collections.Generic.List[object]  # (g) no diagnostic settings / logs
+    $notEval                  = New-Object System.Collections.Generic.List[object]
     $totalProcessed = 0
     $criticalPatterns = @("*prod*", "*prd*", "*production*", "*secret*", "*key*", "*cert*")
-    
+
+    # Az.Monitor diagnostic read is needed for aspect (g); detect support once.
+    $diagCmdAvailable = [bool](Get-Command Get-AzDiagnosticSetting -ErrorAction SilentlyContinue)
+
     foreach ($sub in $Subscriptions) {
         $totalProcessed++
 
@@ -98,6 +109,10 @@ function Test-KeyVaultNetworkSecurity {
         if ($inv.Unavailable) {
             if ($inv.UnavailableReason -eq 'Fetch') {
                 Write-AuditLog -Message "Failed to check Key Vault network security in subscription $($sub.Name): inventory fetch failed" -Level ERROR
+                $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name; Reason = "Key Vault collection failed (detail in audit log)" })
+            }
+            else {
+                $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name; Reason = "Subscription context could not be entered; vaults not evaluated" })
             }
             continue
         }
@@ -110,40 +125,87 @@ function Test-KeyVaultNetworkSecurity {
         $allPrivateEndpoints = @()
         if (-not $peInv.Unavailable) { $allPrivateEndpoints = @($peInv.Items) }
 
+        # Per-vault diagnostic setting reads still need the session on this
+        # subscription (deduped no-op right after a fresh fetch; required on
+        # cache hits from a different subscription).
+        if (@($inv.Items).Count -gt 0 -and -not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+            $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name; Reason = "Subscription context could not be entered; vaults not evaluated" })
+            continue
+        }
+
+        if (-not $diagCmdAvailable -and @($inv.Items).Count -gt 0) {
+            $notEval.Add([PSCustomObject]@{
+                SubscriptionName = $sub.Name
+                Reason = "Audit logging not evaluated (Get-AzDiagnosticSetting / Az.Monitor not available)"
+            })
+        }
+
         foreach ($kv in $inv.Items) {
             $networkRuleSet = $kv.NetworkAcls
-            $hasFirewall = $false
-            $publicAccess = $true
 
-            if ($networkRuleSet) {
-                if ($networkRuleSet.DefaultAction -eq "Deny") {
-                    $publicAccess = $false
-                    $hasFirewall = $true
-                }
-                if ($networkRuleSet.IpAddressRanges -and $networkRuleSet.IpAddressRanges.Count -gt 0) {
-                    $hasFirewall = $true
-                }
-                if ($networkRuleSet.VirtualNetworkResourceIds -and $networkRuleSet.VirtualNetworkResourceIds.Count -gt 0) {
-                    $hasFirewall = $true
-                }
+            # (a) publicNetworkAccess. Explicit 'Disabled' is the only safe value;
+            # absent/unspecified defaults to Enabled for vaults that never set it
+            # (same Azure default semantics as the storage checks).
+            $pnaRaw = $null
+            if ($kv.PSObject.Properties.Name -contains 'PublicNetworkAccess') { $pnaRaw = $kv.PublicNetworkAccess }
+            $pnaState = if ($null -ne $pnaRaw -and "$pnaRaw" -ne '') { "$pnaRaw" } else { "Unspecified" }
+            $pnaPublic = ($pnaState -ne 'Disabled')
+
+            # (b) firewall default action. networkAcls absent = firewall config
+            # unknown -> NotEvaluated for the network aspects, never clean.
+            $defaultAction = $null
+            if ($networkRuleSet -and ($networkRuleSet.PSObject.Properties.Name -contains 'DefaultAction')) {
+                $defaultAction = "$($networkRuleSet.DefaultAction)"
             }
+            $firewallUnknown = ($null -eq $networkRuleSet)
+            $defaultAllow    = ($defaultAction -eq 'Allow')
 
-            $privateEndpoints = @($allPrivateEndpoints | Where-Object {
-                $_.ResourceGroupName -eq $kv.ResourceGroupName -and
-                $_.PrivateLinkServiceConnections.PrivateLinkServiceId -eq $kv.ResourceId
-            })
-
-            if ($publicAccess -and -not $hasFirewall) {
-                $publicNoFirewall.Add([PSCustomObject]@{
+            if ($pnaPublic) {
+                $publicNetworkAccess.Add([PSCustomObject]@{
                     SubscriptionId = $sub.Id
                     SubscriptionName = $sub.Name
                     ResourceGroup = $kv.ResourceGroupName
                     VaultName = $kv.VaultName
+                    PublicNetworkAccess = if ($pnaState -eq 'Unspecified') { "Unspecified (defaults to enabled)" } else { $pnaState }
                     ResourceId = $kv.ResourceId
                     Tags = $kv.Tags
                 })
             }
 
+            if ($defaultAllow) {
+                $firewallDefaultAllow.Add([PSCustomObject]@{
+                    SubscriptionId = $sub.Id
+                    SubscriptionName = $sub.Name
+                    ResourceGroup = $kv.ResourceGroupName
+                    VaultName = $kv.VaultName
+                    DefaultAction = $defaultAction
+                    ResourceId = $kv.ResourceId
+                    Tags = $kv.Tags
+                })
+            }
+            elseif ($firewallUnknown) {
+                $notEval.Add([PSCustomObject]@{
+                    SubscriptionName = $sub.Name
+                    VaultName = "$($kv.VaultName)"
+                    Reason = "Firewall configuration (networkAcls) could not be read; network exposure not evaluated"
+                })
+            }
+
+            # (c) correlation: public endpoint AND firewall default Allow.
+            if ($pnaPublic -and $defaultAllow) {
+                $publicNoFirewall.Add([PSCustomObject]@{
+                    SubscriptionId = $sub.Id
+                    SubscriptionName = $sub.Name
+                    ResourceGroup = $kv.ResourceGroupName
+                    VaultName = $kv.VaultName
+                    PublicNetworkAccess = if ($pnaState -eq 'Unspecified') { "Unspecified (defaults to enabled)" } else { $pnaState }
+                    DefaultAction = $defaultAction
+                    ResourceId = $kv.ResourceId
+                    Tags = $kv.Tags
+                })
+            }
+
+            # (d) purge protection. Absent/false = disabled (the vault default).
             if (-not $kv.EnablePurgeProtection) {
                 $missingPurgeProtection.Add([PSCustomObject]@{
                     SubscriptionId = $sub.Id
@@ -155,6 +217,11 @@ function Test-KeyVaultNetworkSecurity {
                 })
             }
 
+            # (f) critical vault without a private endpoint.
+            $privateEndpoints = @($allPrivateEndpoints | Where-Object {
+                $_.ResourceGroupName -eq $kv.ResourceGroupName -and
+                $_.PrivateLinkServiceConnections.PrivateLinkServiceId -eq $kv.ResourceId
+            })
             $isCritical = $false
             foreach ($pattern in $criticalPatterns) {
                 if ($kv.VaultName -like $pattern) { $isCritical = $true; break }
@@ -169,14 +236,76 @@ function Test-KeyVaultNetworkSecurity {
                     Tags = $kv.Tags
                 })
             }
+
+            # (g) audit logging via diagnostic settings (metadata only). A read
+            # failure is NotEvaluated for this aspect, never clean.
+            if ($diagCmdAvailable) {
+                try {
+                    $diagSettings = @(Invoke-AzureCommand -Command {
+                        Get-AzDiagnosticSetting -ResourceId $kv.ResourceId -ErrorAction Stop
+                    } -CommandName "Get-KeyVaultDiagnostics" -SkipContextCheck)
+                    $hasEnabledLogs = $false
+                    foreach ($ds in $diagSettings) {
+                        if ($ds.PSObject.Properties.Name -contains 'Logs') {
+                            foreach ($log in @($ds.Logs)) {
+                                if ($log.Enabled) { $hasEnabledLogs = $true; break }
+                            }
+                        }
+                        if ($hasEnabledLogs) { break }
+                    }
+                    if (-not $hasEnabledLogs) {
+                        $noAuditLogging.Add([PSCustomObject]@{
+                            SubscriptionId = $sub.Id
+                            SubscriptionName = $sub.Name
+                            ResourceGroup = $kv.ResourceGroupName
+                            VaultName = $kv.VaultName
+                            ResourceId = $kv.ResourceId
+                            Tags = $kv.Tags
+                        })
+                    }
+                }
+                catch {
+                    $notEval.Add([PSCustomObject]@{
+                        SubscriptionName = $sub.Name
+                        VaultName = "$($kv.VaultName)"
+                        Reason = "Diagnostic settings could not be read; audit logging not evaluated"
+                    })
+                }
+            }
         }
     }
-    
+
+    if ($publicNetworkAccess.Count -gt 0) {
+        $remediation = "Disable public network access on the Key Vault and route traffic through private endpoints."
+        Write-Finding -Severity "MEDIUM" `
+                      -Message "Key Vaults with public network access enabled or unspecified (defaults to enabled)" `
+                      -Count $publicNetworkAccess.Count -CountType "UniqueResources" `
+                      -Data $publicNetworkAccess `
+                      -Service "KeyVault" `
+                      -Remediation $remediation `
+                      -Exclusions $Exclusions `
+                      -SubscriptionId "Multiple" `
+                      -SubscriptionName "Multiple"
+    }
+
+    if ($firewallDefaultAllow.Count -gt 0) {
+        $remediation = "Set the Key Vault firewall default action to Deny and allow only required networks."
+        Write-Finding -Severity "MEDIUM" `
+                      -Message "Key Vaults with firewall default action Allow" `
+                      -Count $firewallDefaultAllow.Count -CountType "UniqueResources" `
+                      -Data $firewallDefaultAllow `
+                      -Service "KeyVault" `
+                      -Remediation $remediation `
+                      -Exclusions $Exclusions `
+                      -SubscriptionId "Multiple" `
+                      -SubscriptionName "Multiple"
+    }
+
     if ($publicNoFirewall.Count -gt 0) {
         $remediation = "Restrict Key Vault access using firewall rules and/or private endpoints. Set default action to Deny."
         Write-Finding -Severity "CRITICAL" `
                       -Message "Key Vaults with public access and no firewall restrictions" `
-                      -Count $publicNoFirewall.Count `
+                      -Count $publicNoFirewall.Count -CountType "UniqueResources" `
                       -Data $publicNoFirewall `
                       -Service "KeyVault" `
                       -Remediation $remediation `
@@ -184,12 +313,12 @@ function Test-KeyVaultNetworkSecurity {
                       -SubscriptionId "Multiple" `
                       -SubscriptionName "Multiple"
     }
-    
+
     if ($missingPurgeProtection.Count -gt 0) {
         $remediation = "Enable purge protection to prevent irreversible deletion of Key Vault content."
         Write-Finding -Severity "HIGH" `
                       -Message "Key Vaults without purge protection enabled" `
-                      -Count $missingPurgeProtection.Count `
+                      -Count $missingPurgeProtection.Count -CountType "UniqueResources" `
                       -Data $missingPurgeProtection `
                       -Service "KeyVault" `
                       -Remediation $remediation `
@@ -197,15 +326,42 @@ function Test-KeyVaultNetworkSecurity {
                       -SubscriptionId "Multiple" `
                       -SubscriptionName "Multiple"
     }
-    
+
     if ($criticalNoPrivateEndpoint.Count -gt 0) {
         $remediation = "Configure private endpoints for critical Key Vaults and enforce private access where possible."
         Write-Finding -Severity "MEDIUM" `
                       -Message "Critical Key Vaults without private endpoints" `
-                      -Count $criticalNoPrivateEndpoint.Count `
+                      -Count $criticalNoPrivateEndpoint.Count -CountType "UniqueResources" `
                       -Data $criticalNoPrivateEndpoint `
                       -Service "KeyVault" `
                       -Remediation $remediation `
+                      -Exclusions $Exclusions `
+                      -SubscriptionId "Multiple" `
+                      -SubscriptionName "Multiple"
+    }
+
+    if ($noAuditLogging.Count -gt 0) {
+        $remediation = "Enable diagnostic settings with the AuditEvent category on every Key Vault and send logs to a Log Analytics workspace or storage account."
+        Write-Finding -Severity "MEDIUM" `
+                      -Message "Key Vaults without audit logging enabled (no diagnostic settings with enabled logs)" `
+                      -Count $noAuditLogging.Count -CountType "UniqueResources" `
+                      -Data $noAuditLogging `
+                      -Service "KeyVault" `
+                      -Remediation $remediation `
+                      -Exclusions $Exclusions `
+                      -SubscriptionId "Multiple" `
+                      -SubscriptionName "Multiple"
+    }
+
+    if ($notEval.Count -gt 0) {
+        # Failed collection / unreadable properties are NOT clean: keep the detail
+        # as an explicit NotEvaluated record (no access is not "secure").
+        Write-Finding -Severity "CRITICAL" -Status "NOTEVALUATED" `
+                      -Message "Key Vault network security could not be fully evaluated (collection or property read failed); not reported as clean" `
+                      -Count $notEval.Count -CountType "NotEvaluatedItems" `
+                      -Data $notEval `
+                      -Service "KeyVault" `
+                      -Remediation "Ensure Microsoft.KeyVault/vaults/read and Microsoft.Insights/diagnosticSettings/read on the subscriptions and re-run." `
                       -Exclusions $Exclusions `
                       -SubscriptionId "Multiple" `
                       -SubscriptionName "Multiple"

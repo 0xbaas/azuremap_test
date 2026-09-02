@@ -164,18 +164,84 @@ Describe "Storage correctness fixtures" {
     }
 
     Context "STORAGE-004 anonymous blob access" {
+        BeforeEach {
+            # Data-plane evaluation is strictly opt-in (Phase B3): tests that
+            # exercise container enumeration must pass the gate explicitly.
+            $script:State.Config.IncludeDataPlane = $true
+        }
+        It "without -IncludeDataPlane the check is NOTEVALUATED (never Clean) and does not enumerate" {
+            $script:State.Config.IncludeDataPlane = $false
+            $global:FxAccounts   = @(New-SA @{ AllowBlobPublicAccess=$true })
+            $global:FxContainers = @([PSCustomObject]@{ Name='c1'; PublicAccess='Blob' })
+            Test-StorageAnonymousBlobAccess -Subscriptions @($global:FxSub) -Exclusions @{}
+            $r = $script:State.Results[-1]
+            "$($r.Status)".ToUpper() | Should -Be 'NOTEVALUATED'
+            $r.DataPlaneRequired | Should -BeTrue
+            "$($r.Finding)" | Should -BeLike '*-IncludeDataPlane*'
+            [int]$r.Count | Should -Be 0
+            @($script:State.Results | Where-Object { [int]$_.Count -gt 0 }).Count | Should -Be 0
+        }
         It "container enumeration throws 403 -> NotEvaluated (not clean PASS)" {
             $global:FxAccounts        = @(New-SA @{ AllowBlobPublicAccess=$true })
             $global:FxContainersThrow = $true
             Test-StorageAnonymousBlobAccess -Subscriptions @($global:FxSub) -Exclusions @{}
             @(Get-NotEval 'STORAGE-004').Count | Should -BeGreaterThan 0
         }
-        It "public container detected -> CRITICAL FAIL" {
+        It "public container detected -> CRITICAL FAIL (data-plane confirmed)" {
             $global:FxAccounts   = @(New-SA @{ AllowBlobPublicAccess=$true })
             $global:FxContainers = @([PSCustomObject]@{ Name='c1'; PublicAccess='Blob' })
             Test-StorageAnonymousBlobAccess -Subscriptions @($global:FxSub) -Exclusions @{}
             $m = @(Get-Fin 'STORAGE-004' | Where-Object { [int]$_.Count -gt 0 -and "$($_.Status)".ToUpper() -ne 'NOTEVALUATED' })
             $m.Count | Should -BeGreaterThan 0
+            "$($m[0].Finding)" | Should -BeLike '*CONFIRMED*data-plane*'
+            "$($m[0].Evidence[0].Confirmation)" | Should -Be 'Data-plane confirmed'
+            $m[0].CountType | Should -Be 'UniqueResources'
+        }
+        It "account-level AllowBlobPublicAccess with no public containers -> control-plane signal, NOT the confirmed finding" {
+            $global:FxAccounts   = @(New-SA @{ AllowBlobPublicAccess=$true })
+            $global:FxContainers = @([PSCustomObject]@{ Name='c1'; PublicAccess='Off' })
+            Test-StorageAnonymousBlobAccess -Subscriptions @($global:FxSub) -Exclusions @{}
+            # Query Results directly: the file's comma-return Get-Fin helper does
+            # not compose with Where-Object when several findings exist.
+            $confirmed = @($script:State.Results | Where-Object { $_.CheckId -eq 'STORAGE-004' -and "$($_.Finding)" -like 'Storage accounts with CONFIRMED*' })
+            $confirmed.Count | Should -Be 0
+            $cp = @($script:State.Results | Where-Object { $_.CheckId -eq 'STORAGE-004' -and "$($_.Finding)" -like '*control-plane signal*' })
+            $cp.Count | Should -Be 1
+            [int]$cp[0].Count | Should -Be 1
+            "$($cp[0].Severity)" | Should -Be 'LOW'
+        }
+    }
+
+    Context "STORAGE-003 count semantics (TLS separated from the weak-config list)" {
+        It "TLS-only issues produce a TLS finding with its own count and evidence" {
+            $global:FxAccounts = @(
+                (New-SA @{ MinimumTlsVersion='TLS1_0'; EnableHttpsTrafficOnly=$true; AllowCrossTenantReplication=$false })
+                (New-SA @{ StorageAccountName='sa2'; MinimumTlsVersion='TLS1_2'; EnableHttpsTrafficOnly=$true; AllowCrossTenantReplication=$false })
+                (New-SA @{ StorageAccountName='sa3'; MinimumTlsVersion='TLS1_2'; EnableHttpsTrafficOnly=$true; AllowCrossTenantReplication=$false })
+            )
+            Test-StorageAdvancedSecurity -Subscriptions @($global:FxSub) -Exclusions @{}
+            $tls = @(Get-MainFin 'STORAGE-003' '*minimum TLS*')
+            $tls.Count | Should -Be 1
+            [int]$tls[0].Count | Should -Be 1              # 1 TLS issue - NOT "3 risky"
+            $tls[0].CountType | Should -Be 'UniqueResources'
+            @($tls[0].Evidence).Count | Should -Be 1       # only its own matching evidence
+            "$($tls[0].SummaryText)" | Should -BeLike '*1 issue(s)*across 1 unique account(s)*coverage complete.*'
+        }
+        It "TLS, HTTPS-only and cross-tenant are separate findings; the summary counts unique accounts" {
+            $global:FxAccounts = @(
+                (New-SA @{ MinimumTlsVersion=$null; EnableHttpsTrafficOnly=$false; AllowCrossTenantReplication=$true })
+            )
+            Test-StorageAdvancedSecurity -Subscriptions @($global:FxSub) -Exclusions @{}
+            $tls   = @(Get-MainFin 'STORAGE-003' '*minimum TLS*')
+            $https = @(Get-MainFin 'STORAGE-003' '*HTTPS-only*')
+            $ct    = @(Get-MainFin 'STORAGE-003' '*cross-tenant*')
+            $tls.Count   | Should -Be 1
+            $https.Count | Should -Be 1
+            $ct.Count    | Should -Be 1
+            # 3 issues on 1 account: summary must say "across 1 unique account(s)",
+            # never "3 of 1 storage accounts risky".
+            "$($tls[0].SummaryText)" | Should -BeLike '*3 issue(s)*across 1 unique account(s)*'
+            @($https[0].Evidence[0].PSObject.Properties.Name) | Should -Not -Contain 'CurrentVersion'
         }
     }
 
@@ -282,6 +348,8 @@ Describe "Storage correctness fixtures" {
         }
 
         It "STORAGE-004 container enumeration failure counts as skipped resource (partial coverage)" {
+            # Data-plane evaluation is strictly opt-in (Phase B3).
+            $script:State.Config.IncludeDataPlane = $true
             $global:FxAccounts = @(
                 (New-SA @{ AllowBlobPublicAccess = $false })
                 (New-SA @{ StorageAccountName = 'sa2'; AllowBlobPublicAccess = $false })

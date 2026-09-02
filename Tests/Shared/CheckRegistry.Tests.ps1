@@ -198,6 +198,21 @@ Describe "Write-Finding" {
             $f.PSObject.Properties.Name | Should -Contain $field
         }
     }
+
+    It "finding schema carries CountType (defaults to UniqueResources)" {
+        Write-Finding -Severity "MEDIUM" -Message "CountType default" -Count 0 -Service "KeyVault"
+        $f = $script:State.Results[-1]
+        $f.PSObject.Properties.Name | Should -Contain 'CountType'
+        $f.CountType | Should -Be 'UniqueResources'
+    }
+
+    It "CountType accepts the standardized values and rejects others" {
+        foreach ($ct in @('UniqueResources','Containers','RoleAssignments','RiskSignals','Observations','NotEvaluatedItems')) {
+            { New-AzureMapFinding -Severity 'LOW' -Message 'ct' -Count 1 -CountType $ct -Service 'Storage' } | Should -Not -Throw
+            (New-AzureMapFinding -Severity 'LOW' -Message 'ct' -Count 1 -CountType $ct -Service 'Storage').CountType | Should -Be $ct
+        }
+        { New-AzureMapFinding -Severity 'LOW' -Message 'ct' -Count 1 -CountType 'Bogus' -Service 'Storage' } | Should -Throw
+    }
 }
 
 Describe "Register-AuditCheck" {
