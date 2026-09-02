@@ -5,6 +5,7 @@
 #   Test-ExcessiveRBAC             (IDENTITY-003)
 #   Test-CustomRoles               (IDENTITY-005)
 #   Test-IdentityResourceMapping   (IDENTITY-006)
+#   Test-RBACDecomposition         (IDENTITY-007)
 #   Register-AzureIdentityChecks
 # (IDENTITY-001/002/004 - tenant credential hygiene - relocated to
 #  Products/EntraMap/Checks/TenantIdentity.ps1 for the EntraMap product split.)
@@ -581,6 +582,205 @@ function Test-IdentityResourceMapping {
     }
 }
 
+function Test-RBACDecomposition {
+    <#
+    .SYNOPSIS
+        IDENTITY-007 - colleague-parity decomposition of privileged Azure RBAC
+        at elevated scopes into explicit, separate findings.
+    .DESCRIPTION
+        Uses the cached subscription-scope RBAC read (shared with
+        IDENTITY-003/005/006) - ZERO per-principal API calls, no Graph group
+        resolution. Counts are ASSIGNMENTS (CountType=RoleAssignments), never
+        unique users. Management-group assignments are detected from the same
+        cached read when the ARM response includes them (no separate MG-scope
+        enumeration is performed).
+        RBAC read failure -> NOTEVALUATED, never a misleading clean PASS.
+    #>
+    param(
+        [array]$Subscriptions,
+        [hashtable]$Exclusions,
+        [int]$ProgressId = 0
+    )
+
+    Write-Section -Title "RBAC - PRIVILEGED ASSIGNMENT DECOMPOSITION" -Color "Yellow" -ProgressId $ProgressId
+
+    $privilegedRoles = @("Owner", "Contributor", "User Access Administrator", "Role Based Access Control Administrator")
+
+    $ownerSub       = New-Object System.Collections.Generic.List[object]
+    $ownerMg        = New-Object System.Collections.Generic.List[object]
+    $contributorSub = New-Object System.Collections.Generic.List[object]
+    $uaaSub         = New-Object System.Collections.Generic.List[object]
+    $rbacAdminSub   = New-Object System.Collections.Generic.List[object]
+    $nonHumanPriv   = New-Object System.Collections.Generic.List[object]
+    $groupPriv      = New-Object System.Collections.Generic.List[object]
+    $notEval        = New-Object System.Collections.Generic.List[object]
+    $subsEvaluated  = New-Object System.Collections.Generic.List[string]
+    $subsSkipped    = New-Object System.Collections.Generic.List[string]
+    $totalProcessed = 0
+    $assignmentCount = 0
+
+    foreach ($sub in $Subscriptions) {
+        $totalProcessed++
+        Write-Progress -Activity "Checking RBAC decomposition" `
+                      -Status "Subscription: $($sub.Name)" `
+                      -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
+                      -Id $ProgressId
+
+        $assignments = @(Get-SubscriptionRBACAssignments -SubscriptionId $sub.Id -SubscriptionName $sub.Name)
+        if ($script:State.Cache.ContainsKey('RBACUnavailable') -and
+            $script:State.Cache.RBACUnavailable.ContainsKey("$($sub.Id)") -and
+            $script:State.Cache.RBACUnavailable["$($sub.Id)"]) {
+            $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name })
+            continue
+        }
+        $subsEvaluated.Add($sub.Name)
+
+        foreach ($assignment in $assignments) {
+            $scope = "$($assignment.Scope)"
+            $role  = "$($assignment.RoleDefinitionName)"
+            if ([string]::IsNullOrWhiteSpace($role)) { continue }
+
+            $isSubScope = ($scope -match "^/subscriptions/[^/]+$")
+            $isMgScope  = ($scope -like "/providers/Microsoft.Management/managementGroups/*")
+            if (-not ($isSubScope -or $isMgScope)) { continue }
+
+            $assignmentCount++
+            $evidence = [PSCustomObject]@{
+                SubscriptionId     = $sub.Id
+                SubscriptionName   = $sub.Name
+                RoleDefinitionName = $role
+                PrincipalName      = if ($assignment.DisplayName) { "$($assignment.DisplayName)" } else { "Unknown" }
+                PrincipalType      = "$($assignment.ObjectType)"
+                PrincipalId        = "$($assignment.ObjectId)"
+                Scope              = $scope
+                ScopeType          = if ($isMgScope) { "ManagementGroup" } else { "Subscription" }
+            }
+
+            # Role-scope buckets (a sub/MG-scope assignment can ALSO contribute a
+            # principal-shape signal below - the count language is "signals").
+            if ($isMgScope -and $role -eq "Owner") { $ownerMg.Add($evidence) }
+            if ($isSubScope) {
+                if     ($role -eq "Owner")                                   { $ownerSub.Add($evidence) }
+                elseif ($role -eq "Contributor")                             { $contributorSub.Add($evidence) }
+                elseif ($role -eq "User Access Administrator")               { $uaaSub.Add($evidence) }
+                elseif ($role -eq "Role Based Access Control Administrator") { $rbacAdminSub.Add($evidence) }
+            }
+
+            # Principal-shape signals for privileged roles at sub/MG scope.
+            if ($role -in $privilegedRoles) {
+                $ptype = "$($assignment.ObjectType)"
+                if ($ptype -eq "Group") {
+                    $groupPriv.Add($evidence)
+                }
+                elseif ($ptype -ne "User") {
+                    $nonHumanPriv.Add($evidence)
+                }
+            }
+        }
+    }
+
+    # NOTE: enumerate the generic Lists directly (no @(...) coercion - PS 5.1
+    # throws "Argument types do not match").
+    $signalTotal = $ownerSub.Count + $ownerMg.Count + $contributorSub.Count + $uaaSub.Count + `
+                   $rbacAdminSub.Count + $nonHumanPriv.Count + $groupPriv.Count
+
+    $cov = New-AzureCheckCoverage -Discovered $assignmentCount -Evaluated $assignmentCount -SkippedResources 0 `
+        -CollectionFailures $notEval -SkippedSubscriptions $subsSkipped -EvaluatedSubscriptions $subsEvaluated `
+        -Risky $signalTotal -ResourceNoun 'elevated-scope role assignments'
+    if ($signalTotal -gt 0) {
+        $cov.CoverageSummary = "$assignmentCount elevated-scope role assignment(s) decomposed into $signalTotal signal(s) " +
+            "($($ownerSub.Count) Owner@sub, $($ownerMg.Count) Owner@MG, $($contributorSub.Count) Contributor@sub, " +
+            "$($uaaSub.Count) UAA@sub, $($rbacAdminSub.Count) RBAC-Admin@sub, $($nonHumanPriv.Count) non-human, " +
+            "$($groupPriv.Count) group); counts are assignments/signals, not unique users."
+    }
+    $covParams = New-AzureCheckCoverageParams -Coverage $cov -Discovered $assignmentCount -Evaluated $assignmentCount `
+        -SkippedResources 0 -SkippedSubscriptions $subsSkipped -EvaluatedSubscriptions $subsEvaluated `
+        -ApiSources @('ARM Get-AzRoleAssignment (subscription scope, cached)') -FindingType 'ExcessivePermissions'
+
+    if ($notEval.Count -gt 0) {
+        Write-Finding -Severity "HIGH" -Status "NOTEVALUATED" -CheckId "IDENTITY-007" `
+                      -Message "RBAC decomposition could not be evaluated for one or more subscriptions (Azure RBAC read unavailable under current authentication); not reported as clean" `
+                      -Count $notEval.Count -CountType "NotEvaluatedItems" -Data $notEval -Service "Identity" `
+                      -Remediation "Ensure the ARM permission Microsoft.Authorization/roleAssignments/read is granted and re-run." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple"
+    }
+
+    if ($ownerMg.Count -gt 0) {
+        Write-Finding -Severity "CRITICAL" -Status "FAIL" -CheckId "IDENTITY-007" `
+                      -Message "Owner role assignments at management group scope (assignments, not unique users)" `
+                      -Count $ownerMg.Count -CountType "RoleAssignments" -Data $ownerMg -Service "Identity" `
+                      -SeverityReason 'Counts assignments at MG scope observed in the cached subscription-scope read; one principal may hold several assignments.' `
+                      -Remediation "Remove Owner at management group scope; use PIM and assign at lower scopes." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
+    }
+    if ($ownerSub.Count -gt 0) {
+        Write-Finding -Severity "HIGH" -Status "FAIL" -CheckId "IDENTITY-007" `
+                      -Message "Owner role assignments at subscription scope (assignments, not unique users)" `
+                      -Count $ownerSub.Count -CountType "RoleAssignments" -Data $ownerSub -Service "Identity" `
+                      -SeverityReason 'Counts assignments, not unique users; one principal may hold several assignments.' `
+                      -Remediation "Review Owner assignments; use PIM for standing privileged access." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
+    }
+    if ($uaaSub.Count -gt 0) {
+        Write-Finding -Severity "HIGH" -Status "FAIL" -CheckId "IDENTITY-007" `
+                      -Message "User Access Administrator assignments at subscription scope (assignments, not unique users)" `
+                      -Count $uaaSub.Count -CountType "RoleAssignments" -Data $uaaSub -Service "Identity" `
+                      -SeverityReason 'Counts assignments, not unique users; UAA can grant any role at the scope (privilege escalation).' `
+                      -Remediation "Remove User Access Administrator at subscription scope; prefer RBAC Administrator at narrower scopes." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
+    }
+    if ($contributorSub.Count -gt 0) {
+        Write-Finding -Severity "MEDIUM" -Status "FAIL" -CheckId "IDENTITY-007" `
+                      -Message "Contributor role assignments at subscription scope (assignments, not unique users)" `
+                      -Count $contributorSub.Count -CountType "RoleAssignments" -Data $contributorSub -Service "Identity" `
+                      -SeverityReason 'Counts assignments, not unique users.' `
+                      -Remediation "Review Contributor assignments and scope to resource groups where possible." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
+    }
+    if ($rbacAdminSub.Count -gt 0) {
+        Write-Finding -Severity "MEDIUM" -Status "FAIL" -CheckId "IDENTITY-007" `
+                      -Message "Role Based Access Control Administrator assignments at subscription scope (assignments, not unique users)" `
+                      -Count $rbacAdminSub.Count -CountType "RoleAssignments" -Data $rbacAdminSub -Service "Identity" `
+                      -SeverityReason 'Counts assignments, not unique users.' `
+                      -Remediation "Review RBAC Administrator assignments; constrain with delegation conditions where possible." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
+    }
+    if ($nonHumanPriv.Count -gt 0) {
+        Write-Finding -Severity "MEDIUM" -Status "FAIL" -CheckId "IDENTITY-007" `
+                      -Message "Privileged Azure RBAC roles assigned to non-human principals (service principals / managed identities / unknown)" `
+                      -Count $nonHumanPriv.Count -CountType "RoleAssignments" -Data $nonHumanPriv -Service "Identity" `
+                      -SeverityReason 'Counts assignments, not unique principals; workload identities with privileged roles widen blast radius.' `
+                      -Remediation "Verify each non-human principal still needs the privileged role; reduce to least privilege." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
+    }
+    if ($groupPriv.Count -gt 0) {
+        # Group-based privileged access: effective users require Entra group
+        # resolution, which AzureMap deliberately does NOT perform (no Graph).
+        # Clone the coverage splat so ManualValidationRequired is forced on
+        # without specifying the parameter twice.
+        $groupParams = $covParams.Clone()
+        $groupParams['ManualValidationRequired'] = $true
+        Write-Finding -Severity "MEDIUM" -Status "FAIL" -CheckId "IDENTITY-007" `
+                      -Message "Privileged Azure RBAC roles assigned to groups (effective membership not resolved)" `
+                      -Count $groupPriv.Count -CountType "RoleAssignments" -Data $groupPriv -Service "Identity" `
+                      -SeverityReason 'Counts group assignments, not unique users; effective users are unknown without Entra group resolution.' `
+                      -Remediation "Manually validate group membership in Entra ID (AzureMap does not resolve groups); prefer PIM for groups." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" @groupParams
+    }
+
+    if ($signalTotal -eq 0) {
+        # Explicit coverage record: PASS only with proven coverage (no RBAC
+        # failures); silence is never proof of evaluation.
+        $severity = if ($cov.Severity) { $cov.Severity } else { 'HIGH' }
+        $evidence = if ($notEval.Count -gt 0) { $notEval } else { $null }
+        Write-Finding -Severity $severity -Status $cov.Status -CheckId "IDENTITY-007" `
+                      -Message "Privileged Azure RBAC decomposition (Owner/Contributor/UAA/RBAC Admin at sub/MG scope, non-human and group principals)" `
+                      -Count 0 -CountType "RoleAssignments" -Data $evidence -Service "Identity" `
+                      -Remediation "No action required." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
+    }
+}
+
 function Register-AzureIdentityChecks {
     Register-AuditCheck -CheckId "IDENTITY-003" `
                         -Category "Azure" `
@@ -611,4 +811,14 @@ function Register-AzureIdentityChecks {
                         -RequiredModules @("Az.Accounts", "Az.Resources", "Az.Websites") `
                         -Phase "PerSubscription" `
                         -RequiredResourceTypes @('Microsoft.Web/sites','Microsoft.Compute/virtualMachines')
+
+    Register-AuditCheck -CheckId "IDENTITY-007" `
+                        -Category "Azure" `
+                        -Service "Identity" `
+                        -Name "RBAC Privileged Assignment Decomposition" `
+                        -Function ${function:Test-RBACDecomposition} `
+                        -DefaultSeverity "HIGH" `
+                        -RequiredModules @("Az.Accounts", "Az.Resources") `
+                        -Phase "PerSubscription" `
+                        -AlwaysRun $true
 }

@@ -9,6 +9,8 @@
 #   Test-VNetPeeringSecurity
 #   Test-AzureFirewallThreatIntel
 #   Test-ApplicationGatewayWAF
+#   Test-AppGatewayListenerHygiene      (NETWORK-009)
+#   Test-SensitivePaaSPrivateConnectivity (NETWORK-010)
 #   Test-NetworkExfiltrationPaths
 #   Register-AzureNetworkChecks
 # ============================================================================
@@ -710,6 +712,395 @@ function Test-ApplicationGatewayWAF {
     }
 }
 
+function Test-AppGatewayListenerHygiene {
+    <#
+    .SYNOPSIS
+        NETWORK-009 - Application Gateway HTTP/TLS listener hygiene.
+    .DESCRIPTION
+        * HTTP listener without an HTTPS redirect -> MEDIUM.
+        * HTTP listener whose RedirectConfiguration targets an HTTPS listener
+          (redirect-only) -> NOT flagged.
+        * SSL policy below TLS 1.2 (Predefined legacy names / names containing
+          TLSv1_0/TLSv1_1, or Custom minProtocolVersion TLSv1_0/TLSv1_1, or
+          unspecified legacy default) -> MEDIUM, HIGH when the gateway has a
+          public frontend IP.
+        Inventory read failure -> NOTEVALUATED, never a misleading clean PASS.
+    #>
+    param(
+        [array]$Subscriptions,
+        [hashtable]$Exclusions,
+        [int]$ProgressId = 0
+    )
+
+    Write-Section -Title "APPLICATION GATEWAYS - LISTENER / TLS HYGIENE" -Color "Yellow" -ProgressId $ProgressId
+
+    # Legacy predefined SSL policies that allow TLS below 1.2 (date-based names;
+    # names literally containing TLSv1_0/TLSv1_1 are matched separately below).
+    $legacyPredefinedPolicies = @('AppGwSslPolicy20150501', 'AppGwSslPolicy20170401')
+
+    $httpNoRedirect = New-Object System.Collections.Generic.List[object]
+    $weakTls        = New-Object System.Collections.Generic.List[object]
+    $notEval        = New-Object System.Collections.Generic.List[object]
+    $subsEvaluated  = New-Object System.Collections.Generic.List[string]
+    $subsSkipped    = New-Object System.Collections.Generic.List[string]
+    $totalGateways  = 0
+    $totalProcessed = 0
+
+    foreach ($sub in $Subscriptions) {
+        $totalProcessed++
+        Write-Progress -Activity "Checking App Gateway listener hygiene" `
+                      -Status "Subscription: $($sub.Name)" `
+                      -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
+                      -Id $ProgressId
+
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind ApplicationGateways
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { $subsSkipped.Add($sub.Name) }
+            else { $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name; Reason = 'Application Gateway collection failed' }) }
+            continue
+        }
+        $subsEvaluated.Add($sub.Name)
+        $totalGateways += @($inv.Items).Count
+
+        foreach ($appgw in $inv.Items) {
+            # Public-facing = any frontend IP configuration bound to a public IP.
+            $isPublic = $false
+            foreach ($fe in @($appgw.FrontendIPConfigurations)) {
+                if ($fe -and ($fe.PSObject.Properties.Name -contains 'PublicIPAddress') -and $fe.PublicIPAddress) { $isPublic = $true; break }
+            }
+            $facing = if ($isPublic) { 'Public' } else { 'Private' }
+
+            # Listener map (id -> protocol) for redirect-target resolution.
+            $listenerProtoById = @{}
+            foreach ($l in @($appgw.HttpListeners)) {
+                if ($l -and $l.Id) { $listenerProtoById["$($l.Id)".ToLowerInvariant()] = "$($l.Protocol)" }
+            }
+            $redirectById = @{}
+            foreach ($rc in @($appgw.RedirectConfigurations)) {
+                if ($rc -and $rc.Id) { $redirectById["$($rc.Id)".ToLowerInvariant()] = $rc }
+            }
+
+            foreach ($listener in @($appgw.HttpListeners)) {
+                if ("$($listener.Protocol)" -ne 'Http') { continue }
+
+                $redirectOk = $false
+                $redirectRef = $null
+                if ($listener.PSObject.Properties.Name -contains 'RedirectConfiguration') { $redirectRef = $listener.RedirectConfiguration }
+                if ($redirectRef) {
+                    # Redirect-only configuration is acceptable only when it
+                    # targets an HTTPS listener. An unresolvable reference is
+                    # treated as a redirect (never a false positive).
+                    $rcId = "$($redirectRef.Id)".ToLowerInvariant()
+                    if ($rcId -and $redirectById.ContainsKey($rcId)) {
+                        $targetId = "$($redirectById[$rcId].TargetListener.Id)".ToLowerInvariant()
+                        if (-not $targetId -or -not $listenerProtoById.ContainsKey($targetId) -or
+                            $listenerProtoById[$targetId] -eq 'Https') {
+                            $redirectOk = $true
+                        }
+                    }
+                    else {
+                        $redirectOk = $true
+                    }
+                }
+
+                if (-not $redirectOk) {
+                    $httpNoRedirect.Add([PSCustomObject]@{
+                        SubscriptionId   = $sub.Id
+                        SubscriptionName = $sub.Name
+                        ResourceGroup    = $appgw.ResourceGroupName
+                        GatewayName      = $appgw.Name
+                        ListenerName     = "$($listener.Name)"
+                        FrontendPort     = if ($listener.FrontendPort) { "$($listener.FrontendPort.Id)" } else { $null }
+                        Facing           = $facing
+                    })
+                }
+            }
+
+            # SSL policy: absent/unspecified means the legacy default (TLS 1.0
+            # allowed) - flagged explicitly, consistent with the storage TLS
+            # "unspecified is risky" semantics.
+            $sp = $appgw.SslPolicy
+            $weak = $false
+            $tlsDetail = $null
+            if ($sp) {
+                $ptype = "$($sp.PolicyType)"
+                if ($ptype -eq 'Predefined') {
+                    $pname = "$($sp.PolicyName)"
+                    if ($pname -match 'TLSv1_0|TLSv1_1' -or $legacyPredefinedPolicies -contains $pname) {
+                        $weak = $true; $tlsDetail = "Predefined policy '$pname' allows TLS < 1.2"
+                    }
+                }
+                elseif ($ptype -eq 'Custom' -or ($sp.PSObject.Properties.Name -contains 'MinProtocolVersion' -and $sp.MinProtocolVersion)) {
+                    $min = "$($sp.MinProtocolVersion)"
+                    if ($min -in @('TLSv1_0', 'TLSv1_1')) { $weak = $true; $tlsDetail = "Custom policy minProtocolVersion $min" }
+                }
+            }
+            else {
+                $weak = $true; $tlsDetail = 'Unspecified (legacy default policy allows TLS 1.0/1.1)'
+            }
+
+            if ($weak) {
+                $weakTls.Add([PSCustomObject]@{
+                    SubscriptionId   = $sub.Id
+                    SubscriptionName = $sub.Name
+                    ResourceGroup    = $appgw.ResourceGroupName
+                    GatewayName      = $appgw.Name
+                    SslPolicy        = $tlsDetail
+                    Facing           = $facing
+                    Severity         = if ($isPublic) { 'HIGH' } else { 'MEDIUM' }
+                })
+            }
+        }
+    }
+
+    $signalTotal = $httpNoRedirect.Count + $weakTls.Count
+    $cov = New-AzureCheckCoverage -Discovered $totalGateways -Evaluated $totalGateways -SkippedResources 0 `
+        -CollectionFailures $notEval -SkippedSubscriptions $subsSkipped -EvaluatedSubscriptions $subsEvaluated `
+        -Risky $signalTotal -ResourceNoun 'application gateways'
+    $covParams = New-AzureCheckCoverageParams -Coverage $cov -Discovered $totalGateways -Evaluated $totalGateways `
+        -SkippedResources 0 -SkippedSubscriptions $subsSkipped -EvaluatedSubscriptions $subsEvaluated `
+        -ApiSources @('ARM Get-AzApplicationGateway') -FindingType 'Misconfiguration'
+
+    if ($httpNoRedirect.Count -gt 0) {
+        Write-Finding -Severity "MEDIUM" -Status "FAIL" -CheckId "NETWORK-009" `
+                      -Message "Application Gateway HTTP listeners without HTTPS redirect" `
+                      -Count $httpNoRedirect.Count -CountType "UniqueResources" -Data $httpNoRedirect -Service "Network" `
+                      -SeverityReason 'Plaintext HTTP listeners accept unencrypted traffic; redirect-only listeners targeting an HTTPS listener are not flagged.' `
+                      -Remediation "Add a redirect configuration from each HTTP listener to an HTTPS listener, or remove the HTTP listener." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
+    }
+    $weakHigh   = New-Object System.Collections.Generic.List[object]
+    $weakMedium = New-Object System.Collections.Generic.List[object]
+    foreach ($w in $weakTls) { if ($w.Severity -eq 'HIGH') { $weakHigh.Add($w) } else { $weakMedium.Add($w) } }
+    if ($weakHigh.Count -gt 0) {
+        Write-Finding -Severity "HIGH" -Status "FAIL" -CheckId "NETWORK-009" `
+                      -Message "Public-facing Application Gateways with SSL policy below TLS 1.2" `
+                      -Count $weakHigh.Count -CountType "UniqueResources" -Data $weakHigh -Service "Network" `
+                      -SeverityReason 'Internet-facing gateway accepting TLS < 1.2: downgrade and weak-cipher exposure.' `
+                      -Remediation "Apply a predefined SSL policy requiring TLS 1.2+ (e.g. AppGwSslPolicy20220101) or a custom policy with minProtocolVersion TLSv1_2." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
+    }
+    if ($weakMedium.Count -gt 0) {
+        Write-Finding -Severity "MEDIUM" -Status "FAIL" -CheckId "NETWORK-009" `
+                      -Message "Application Gateways with SSL policy below TLS 1.2 (or unspecified legacy default)" `
+                      -Count $weakMedium.Count -CountType "UniqueResources" -Data $weakMedium -Service "Network" `
+                      -SeverityReason 'Internal gateway accepting TLS < 1.2; context-dependent.' `
+                      -Remediation "Apply a predefined SSL policy requiring TLS 1.2+ or a custom policy with minProtocolVersion TLSv1_2." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
+    }
+    if ($signalTotal -eq 0) {
+        $severity = if ($cov.Severity) { $cov.Severity } else { 'MEDIUM' }
+        $evidence = if ($notEval.Count -gt 0) { $notEval } else { $null }
+        Write-Finding -Severity $severity -Status $cov.Status -CheckId "NETWORK-009" `
+                      -Message "Application Gateway listener/TLS hygiene (HTTP without redirect, SSL policy below TLS 1.2)" `
+                      -Count 0 -Data $evidence -Service "Network" `
+                      -Remediation "Require HTTPS listeners and TLS 1.2+ SSL policies." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
+    }
+    if ($notEval.Count -gt 0 -and $signalTotal -gt 0) {
+        Write-Finding -Severity "MEDIUM" -Status "NOTEVALUATED" -CheckId "NETWORK-009" `
+                      -Message "Application Gateway listener hygiene could not be evaluated for one or more subscriptions (collection failed); not reported as clean" `
+                      -Count $notEval.Count -CountType "NotEvaluatedItems" -Data $notEval -Service "Network" `
+                      -Remediation "Ensure Microsoft.Network/applicationGateways/read on all in-scope subscriptions and re-run." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple"
+    }
+}
+
+function Test-SensitivePaaSPrivateConnectivity {
+    <#
+    .SYNOPSIS
+        NETWORK-010 - sensitive PaaS resources with public network access and
+        no linked private endpoint.
+    .DESCRIPTION
+        Flags resources whose publicNetworkAccess is enabled or unspecified AND
+        that have no private endpoint connection linked to the resource id
+        (matched from the shared PrivateEndpoints inventory, both automatic and
+        manual connections). Caveats carried on the finding: a private IP alone
+        does not prove a resource is private; a private endpoint must be linked
+        to the resource; DNS resolution is not verified; public network access
+        is a separate property from firewall rules. Firewall defaultDeny (where
+        readable on the list shape) downgrades severity to LOW.
+        Failed resource or private-endpoint reads -> NOTEVALUATED, never Clean.
+    #>
+    param(
+        [array]$Subscriptions,
+        [hashtable]$Exclusions,
+        [int]$ProgressId = 0
+    )
+
+    Write-Section -Title "SENSITIVE PAAS - PRIVATE CONNECTIVITY" -Color "Yellow" -ProgressId $ProgressId
+
+    # Per-kind descriptors. GetPna returns 'Public' (enabled or unspecified
+    # default), 'Private' (explicitly disabled / internal), or 'Unknown'.
+    $resourceSets = @(
+        @{ Kind = 'StorageAccounts'; TypeLabel = 'Storage Account';
+           GetId = { param($r) "$($r.Id)" }; GetName = { param($r) "$($r.StorageAccountName)" };
+           GetPna = { param($r) if ("$($r.PublicNetworkAccess)" -eq 'Disabled') { 'Private' } else { 'Public' } };
+           FirewallDeny = { param($r) $false } }
+        @{ Kind = 'KeyVaults'; TypeLabel = 'Key Vault';
+           GetId = { param($r) "$($r.ResourceId)" }; GetName = { param($r) "$($r.VaultName)" };
+           GetPna = { param($r) if ("$($r.PublicNetworkAccess)" -eq 'Disabled') { 'Private' } else { 'Public' } };
+           FirewallDeny = { param($r) ($r.NetworkAcls -and "$($r.NetworkAcls.DefaultAction)" -eq 'Deny') } }
+        @{ Kind = 'SqlServers'; TypeLabel = 'SQL Server';
+           GetId = { param($r) "$($r.ResourceId)" }; GetName = { param($r) "$($r.ServerName)" };
+           GetPna = { param($r) if ("$($r.PublicNetworkAccess)" -eq 'Disabled') { 'Private' } else { 'Public' } };
+           FirewallDeny = { param($r) $false } }
+        @{ Kind = 'CosmosAccounts'; TypeLabel = 'Cosmos DB Account';
+           GetId = { param($r) "$($r.ResourceId)" }; GetName = { param($r) "$($r.Name)" };
+           GetPna = { param($r)
+               $p = $null
+               if ($r.PSObject.Properties.Name -contains 'Properties' -and $r.Properties) {
+                   if ($r.Properties -is [hashtable]) { $p = $r.Properties['publicNetworkAccess'] }
+                   elseif ($r.Properties.PSObject.Properties.Name -contains 'publicNetworkAccess') { $p = $r.Properties.publicNetworkAccess }
+               }
+               if ("$p" -eq 'Disabled') { 'Private' } else { 'Public' } };
+           FirewallDeny = { param($r) $false } }
+        @{ Kind = 'ContainerRegistries'; TypeLabel = 'Container Registry';
+           GetId = { param($r) "$($r.Id)" }; GetName = { param($r) "$($r.Name)" };
+           GetPna = { param($r) if ("$($r.PublicNetworkAccess)" -eq 'Disabled') { 'Private' } else { 'Public' } };
+           FirewallDeny = { param($r) ($r.NetworkRuleSet -and "$($r.NetworkRuleSet.DefaultAction)" -eq 'Deny') } }
+        @{ Kind = 'ServiceBusNamespaces'; TypeLabel = 'Service Bus Namespace';
+           GetId = { param($r) "$($r.Id)" }; GetName = { param($r) "$($r.Name)" };
+           GetPna = { param($r) if ("$($r.PublicNetworkAccess)" -eq 'Disabled') { 'Private' } else { 'Public' } };
+           FirewallDeny = { param($r) ($r.NetworkRuleSet -and "$($r.NetworkRuleSet.DefaultAction)" -eq 'Deny') } }
+        @{ Kind = 'WebApps'; TypeLabel = 'App Service App';
+           GetId = { param($r) "$($r.Id)" }; GetName = { param($r) "$($r.Name)" };
+           GetPna = { param($r) if ("$($r.PublicNetworkAccess)" -eq 'Disabled') { 'Private' } else { 'Public' } };
+           FirewallDeny = { param($r) $false } }
+        @{ Kind = 'ApiManagementServices'; TypeLabel = 'API Management Service';
+           GetId = { param($r) "$($r.Id)" }; GetName = { param($r) "$($r.Name)" };
+           GetPna = { param($r)
+               if ("$($r.VpnType)" -eq 'Internal' -or "$($r.VirtualNetworkType)" -eq 'Internal') { 'Private' }
+               elseif ("$($r.PublicNetworkAccess)" -eq 'Disabled') { 'Private' }
+               else { 'Public' } };
+           FirewallDeny = { param($r) $false } }
+    )
+
+    $exposed   = New-Object System.Collections.Generic.List[object]  # MEDIUM: public, no PE
+    $mitigated = New-Object System.Collections.Generic.List[object]  # LOW: public, no PE, firewall defaultDeny
+    $notEval   = New-Object System.Collections.Generic.List[object]
+    $subsEvaluated = New-Object System.Collections.Generic.List[string]
+    $subsSkipped   = New-Object System.Collections.Generic.List[string]
+    $totalResources = 0
+    $evaluatedResources = 0
+    $totalProcessed = 0
+
+    foreach ($sub in $Subscriptions) {
+        $totalProcessed++
+        Write-Progress -Activity "Checking PaaS private connectivity" `
+                      -Status "Subscription: $($sub.Name)" `
+                      -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
+                      -Id $ProgressId
+
+        # Private endpoints first: a failed PE read means linkage can never be
+        # proven for this subscription -> NotEvaluated, never Clean.
+        $peInv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind PrivateEndpoints
+        if ($peInv.Unavailable) {
+            if ($peInv.UnavailableReason -eq 'ContextSwitch') { $subsSkipped.Add($sub.Name) }
+            else { $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name; ResourceType = '(all)'; Reason = 'Private endpoint collection failed - linkage unproven' }) }
+            continue
+        }
+
+        # Linked-resource set: every PrivateLinkServiceId referenced by any PE
+        # in this subscription (automatic + manual connections).
+        $linkedResourceIds = @{}
+        foreach ($pe in @($peInv.Items)) {
+            foreach ($conn in @($pe.PrivateLinkServiceConnections)) {
+                if ($conn -and $conn.PrivateLinkServiceId) { $linkedResourceIds["$($conn.PrivateLinkServiceId)".ToLowerInvariant()] = $true }
+            }
+            foreach ($conn in @($pe.ManualPrivateLinkServiceConnections)) {
+                if ($conn -and $conn.PrivateLinkServiceId) { $linkedResourceIds["$($conn.PrivateLinkServiceId)".ToLowerInvariant()] = $true }
+            }
+        }
+
+        $subEvaluated = $false
+        foreach ($set in $resourceSets) {
+            $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind $set.Kind
+            if ($inv.Unavailable) {
+                if ($inv.UnavailableReason -eq 'ContextSwitch') {
+                    if (-not $subsSkipped.Contains($sub.Name)) { $subsSkipped.Add($sub.Name) }
+                    break
+                }
+                $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name; ResourceType = $set.TypeLabel; Reason = 'Resource collection failed' })
+                continue
+            }
+            $subEvaluated = $true
+            $totalResources += @($inv.Items).Count
+
+            foreach ($res in @($inv.Items)) {
+                $evaluatedResources++
+                $rid  = & $set.GetId $res
+                $name = & $set.GetName $res
+                $pna  = & $set.GetPna $res
+
+                if ($pna -eq 'Unknown') {
+                    $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name; ResourceType = $set.TypeLabel; ResourceName = $name; Reason = 'publicNetworkAccess unreadable' })
+                    continue
+                }
+                if ($pna -eq 'Private') { continue }
+                if ($rid -and $linkedResourceIds.ContainsKey($rid.ToLowerInvariant())) { continue }
+
+                $entry = [PSCustomObject]@{
+                    SubscriptionId      = $sub.Id
+                    SubscriptionName    = $sub.Name
+                    ResourceType        = $set.TypeLabel
+                    ResourceName        = $name
+                    ResourceGroup       = "$($res.ResourceGroupName)"
+                    PublicNetworkAccess = 'Enabled or unspecified'
+                    PrivateEndpointLinked = $false
+                    FirewallDefaultDeny = [bool](& $set.FirewallDeny $res)
+                    ResourceId          = $rid
+                }
+                if ($entry.FirewallDefaultDeny) { $mitigated.Add($entry) } else { $exposed.Add($entry) }
+            }
+        }
+        if ($subEvaluated -and -not $subsEvaluated.Contains($sub.Name)) { $subsEvaluated.Add($sub.Name) }
+    }
+
+    $signalTotal = $exposed.Count + $mitigated.Count
+    $cov = New-AzureCheckCoverage -Discovered $totalResources -Evaluated $evaluatedResources -SkippedResources 0 `
+        -CollectionFailures $notEval -SkippedSubscriptions $subsSkipped -EvaluatedSubscriptions $subsEvaluated `
+        -Risky $signalTotal -ResourceNoun 'sensitive PaaS resources'
+    $covParams = New-AzureCheckCoverageParams -Coverage $cov -Discovered $totalResources -Evaluated $evaluatedResources `
+        -SkippedResources 0 -SkippedSubscriptions $subsSkipped -EvaluatedSubscriptions $subsEvaluated `
+        -ApiSources @('ARM Get-AzPrivateEndpoint', 'ARM per-service resource lists (cached inventory)') -FindingType 'Exposure'
+
+    $caveats = 'Caveats: a private IP alone does not prove the resource is private - a private endpoint must be linked to the resource; DNS resolution is not verified; public network access is a separate property from firewall rules.'
+
+    if ($exposed.Count -gt 0) {
+        Write-Finding -Severity "MEDIUM" -Status "FAIL" -CheckId "NETWORK-010" `
+                      -Message "Sensitive PaaS resources with public network access and no linked private endpoint" `
+                      -Count $exposed.Count -CountType "UniqueResources" -Data $exposed -Service "Network" `
+                      -SeverityReason $caveats `
+                      -Remediation "Add private endpoints and set publicNetworkAccess to Disabled where private connectivity is the intended access path. $caveats" `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
+    }
+    if ($mitigated.Count -gt 0) {
+        Write-Finding -Severity "LOW" -Status "FAIL" -CheckId "NETWORK-010" `
+                      -Message "Sensitive PaaS resources without a linked private endpoint (public network access mitigated by firewall default deny)" `
+                      -Count $mitigated.Count -CountType "UniqueResources" -Data $mitigated -Service "Network" `
+                      -SeverityReason "Firewall default action Deny reduces practical exposure, so severity is LOW. $caveats" `
+                      -Remediation "Consider private endpoints for defense in depth. $caveats" `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
+    }
+    if ($signalTotal -eq 0) {
+        $severity = if ($cov.Severity) { $cov.Severity } else { 'MEDIUM' }
+        $evidence = if ($notEval.Count -gt 0) { $notEval } else { $null }
+        Write-Finding -Severity $severity -Status $cov.Status -CheckId "NETWORK-010" `
+                      -Message "Sensitive PaaS resources with public network access and no linked private endpoint" `
+                      -Count 0 -Data $evidence -Service "Network" `
+                      -Remediation "Add private endpoints and disable public network access where private connectivity is intended." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
+    }
+    if ($notEval.Count -gt 0 -and $signalTotal -gt 0) {
+        Write-Finding -Severity "MEDIUM" -Status "NOTEVALUATED" -CheckId "NETWORK-010" `
+                      -Message "Private connectivity could not be fully evaluated (resource or private-endpoint reads failed); not reported as clean" `
+                      -Count $notEval.Count -CountType "NotEvaluatedItems" -Data $notEval -Service "Network" `
+                      -Remediation "Ensure Microsoft.Network/privateEndpoints/read plus per-service read permissions and re-run." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple"
+    }
+}
+
 function Test-NetworkExfiltrationPaths {
     param(
         [array]$Subscriptions,
@@ -917,4 +1308,24 @@ function Register-AzureNetworkChecks {
                         -RequiredModules @("Az.Accounts", "Az.Network") `
                         -Phase "PerSubscription" `
                         -RequiredResourceTypes @('Microsoft.Network/networkSecurityGroups','Microsoft.Network/routeTables')
+
+    Register-AuditCheck -CheckId "NETWORK-009" `
+                        -Category "Azure" `
+                        -Service "Network" `
+                        -Name "App Gateway Listener Hygiene" `
+                        -Function ${function:Test-AppGatewayListenerHygiene} `
+                        -DefaultSeverity "MEDIUM" `
+                        -RequiredModules @("Az.Accounts", "Az.Network") `
+                        -Phase "PerSubscription" `
+                        -RequiredResourceTypes @('Microsoft.Network/applicationGateways')
+
+    Register-AuditCheck -CheckId "NETWORK-010" `
+                        -Category "Azure" `
+                        -Service "Network" `
+                        -Name "Sensitive PaaS Private Connectivity" `
+                        -Function ${function:Test-SensitivePaaSPrivateConnectivity} `
+                        -DefaultSeverity "MEDIUM" `
+                        -RequiredModules @("Az.Accounts", "Az.Network") `
+                        -Phase "PerSubscription" `
+                        -RequiredResourceTypes @('Microsoft.Storage/storageAccounts','Microsoft.KeyVault/vaults','Microsoft.Sql/servers','Microsoft.DocumentDb/databaseAccounts','Microsoft.ContainerRegistry/registries','Microsoft.ServiceBus/namespaces','Microsoft.Web/sites','Microsoft.ApiManagement/service')
 }

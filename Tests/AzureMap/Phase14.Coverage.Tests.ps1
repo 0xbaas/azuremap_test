@@ -409,9 +409,10 @@ Describe "Exports preserve explicit status and coverage" {
         ($linkIdx -join ',')   | Should -Be '0,1'
         ($anchorIdx -join ',') | Should -Be '0,1'
 
-        # link text carries the real count
-        $html | Should -Match 'View 2 affected'
-        $html | Should -Match 'View 3 affected'
+        # link text carries the real count (with the CountType display label;
+        # both fixture findings default to CountType=UniqueResources)
+        $html | Should -Match 'View 2 resources'
+        $html | Should -Match 'View 3 resources'
 
         # CRITICAL sorts first: comp-0 is the CRITICAL group in both sections
         $compBlock = $html.Substring($html.IndexOf('id="comp-0"'), 400)

@@ -7,6 +7,8 @@
 #   Test-ContainerRegistrySecurity
 #   Test-VMMonitoringAgents
 #   Test-AppServiceSecurity
+#   Test-AppServiceFtpState        (COMPUTE-006)
+#   Test-VMBackupCoverage          (COMPUTE-007)
 #   Register-AzureComputeChecks
 # ============================================================================
 
@@ -551,6 +553,349 @@ function Test-AppServiceSecurity {
     }
 }
 
+function Test-AppServiceFtpSupported {
+    <#
+    .SYNOPSIS
+        Detects once per session whether Get-AzWebApp is available (Az.Websites
+        module support). Result is cached in script scope; tests may preset
+        $script:AppServiceFtpSupported. Same feature-detection pattern as
+        Test-StorageSasPolicySupported in Storage.ps1.
+    #>
+    [CmdletBinding()]
+    param()
+    $cached = Get-Variable -Name 'AppServiceFtpSupported' -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if ($null -ne $cached) {
+        return [bool]$cached
+    }
+    $supported = $false
+    try {
+        $supported = [bool](Get-Command -Name Get-AzWebApp -ErrorAction SilentlyContinue)
+    }
+    catch {
+        $supported = $false
+    }
+    $script:AppServiceFtpSupported = $supported
+    return $supported
+}
+
+function Test-AppServiceFtpState {
+    <#
+    .SYNOPSIS
+        COMPUTE-006 - App Service FTP(S) state. ftpsState 'AllAllowed' permits
+        plaintext FTP credential and content transfer -> MEDIUM. 'FtpsOnly' and
+        'Disabled' pass. Unknown/unreadable state -> NotEvaluated, never clean.
+    #>
+    param(
+        [array]$Subscriptions,
+        [hashtable]$Exclusions,
+        [int]$ProgressId = 0
+    )
+
+    Write-Section -Title "APP SERVICE - FTP STATE" -Color "Yellow" -ProgressId $ProgressId
+
+    # Feature-detect cmdlet support (older/missing Az.Websites): never a silent skip.
+    if (-not (Test-AppServiceFtpSupported)) {
+        Write-Finding -Severity "MEDIUM" -Status "NOTEVALUATED" -CheckId "COMPUTE-006" `
+                      -Message "App Service FTP state not evaluated: Get-AzWebApp unavailable (Az.Websites module support missing)" `
+                      -Count 0 -Data $null -Service "AppService" `
+                      -Remediation "Install a current Az.Websites module and re-run." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple"
+        return
+    }
+
+    $ftpOpen   = New-Object System.Collections.Generic.List[object]
+    $notEval   = New-Object System.Collections.Generic.List[object]
+    $subsEvaluated = New-Object System.Collections.Generic.List[string]
+    $subsSkipped   = New-Object System.Collections.Generic.List[string]
+    $totalApps = 0
+    $evaluatedApps = 0
+    $skippedResources = 0
+    $totalProcessed = 0
+
+    foreach ($sub in $Subscriptions) {
+        $totalProcessed++
+        Write-Progress -Activity "Checking App Service FTP state" `
+                      -Status "Subscription: $($sub.Name)" `
+                      -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
+                      -Id $ProgressId
+
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind WebApps
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { $subsSkipped.Add($sub.Name) }
+            else { $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name; Reason = 'Web app collection failed' }) }
+            continue
+        }
+        $subsEvaluated.Add($sub.Name)
+        $totalApps += @($inv.Items).Count
+
+        # Per-app detail reads (only when the list shape lacks SiteConfig) need
+        # this subscription's context (deduped no-op right after a fresh fetch).
+        if (@($inv.Items).Count -gt 0 -and -not (Set-SubscriptionContext -SubscriptionId $sub.Id -SubscriptionName $sub.Name)) {
+            $subsSkipped.Add($sub.Name)
+            continue
+        }
+
+        foreach ($app in $inv.Items) {
+            $ftpsState = $null
+            if ($app.PSObject.Properties.Name -contains 'SiteConfig' -and $app.SiteConfig) {
+                if ($app.SiteConfig -is [hashtable]) {
+                    if ($app.SiteConfig.ContainsKey('FtpsState')) { $ftpsState = $app.SiteConfig['FtpsState'] }
+                }
+                elseif ($app.SiteConfig.PSObject.Properties.Name -contains 'FtpsState') {
+                    $ftpsState = $app.SiteConfig.FtpsState
+                }
+            }
+            if ($null -eq $ftpsState) {
+                # List shape did not carry the site config: one detail read.
+                try {
+                    $detail = Invoke-AzureCommand -Command {
+                        Get-AzWebApp -ResourceGroupName $app.ResourceGroupName -Name $app.Name -ErrorAction Stop
+                    } -CommandName "Get-WebAppDetail" -SkipContextCheck
+                    if ($detail -and $detail.SiteConfig) {
+                        if ($detail.SiteConfig -is [hashtable]) {
+                            if ($detail.SiteConfig.ContainsKey('FtpsState')) { $ftpsState = $detail.SiteConfig['FtpsState'] }
+                        }
+                        elseif ($detail.SiteConfig.PSObject.Properties.Name -contains 'FtpsState') {
+                            $ftpsState = $detail.SiteConfig.FtpsState
+                        }
+                    }
+                }
+                catch {
+                    $ftpsState = $null
+                }
+            }
+
+            if ($null -eq $ftpsState -or "$ftpsState" -eq '') {
+                # Read failure / property absent -> NotEvaluated, never clean.
+                $notEval.Add([PSCustomObject]@{
+                    SubscriptionName = $sub.Name
+                    ResourceGroup    = $app.ResourceGroupName
+                    AppName          = $app.Name
+                    Reason           = 'ftpsState unreadable or absent'
+                })
+                $skippedResources++
+                continue
+            }
+            $evaluatedApps++
+
+            if ("$ftpsState" -eq 'AllAllowed') {
+                $ftpOpen.Add([PSCustomObject]@{
+                    SubscriptionId   = $sub.Id
+                    SubscriptionName = $sub.Name
+                    ResourceGroup    = $app.ResourceGroupName
+                    AppName          = $app.Name
+                    FtpsState        = "$ftpsState"
+                })
+            }
+            # 'FtpsOnly' / 'Disabled' -> pass; any other value is unusual but not
+            # plaintext-FTP-open, so it is not flagged.
+        }
+    }
+
+    $cov = New-AzureCheckCoverage -Discovered $totalApps -Evaluated $evaluatedApps -SkippedResources $skippedResources `
+        -CollectionFailures $notEval -SkippedSubscriptions $subsSkipped -EvaluatedSubscriptions $subsEvaluated `
+        -Risky $ftpOpen.Count -ResourceNoun 'web apps'
+    $covParams = New-AzureCheckCoverageParams -Coverage $cov -Discovered $totalApps -Evaluated $evaluatedApps `
+        -SkippedResources $skippedResources -SkippedSubscriptions $subsSkipped -EvaluatedSubscriptions $subsEvaluated `
+        -ApiSources @('ARM Get-AzWebApp (SiteConfig.FtpsState)') -FindingType 'Misconfiguration'
+
+    if ($ftpOpen.Count -gt 0) {
+        Write-Finding -Severity "MEDIUM" -Status "FAIL" -CheckId "COMPUTE-006" `
+                      -Message "App Service apps with plaintext FTP allowed (ftpsState = AllAllowed)" `
+                      -Count $ftpOpen.Count -CountType "UniqueResources" -Data $ftpOpen -Service "AppService" `
+                      -SeverityReason 'Plaintext FTP transmits deployment credentials and content unencrypted; context-dependent exposure.' `
+                      -Remediation "Set FTPS Only or Disable FTP: Update site config ftpsState to 'FtpsOnly' or 'Disabled'." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
+    }
+    else {
+        $severity = if ($cov.Severity) { $cov.Severity } else { 'MEDIUM' }
+        $evidence = if ($notEval.Count -gt 0) { $notEval } else { $null }
+        Write-Finding -Severity $severity -Status $cov.Status -CheckId "COMPUTE-006" `
+                      -Message "App Service apps with plaintext FTP allowed (ftpsState = AllAllowed)" `
+                      -Count 0 -Data $evidence -Service "AppService" `
+                      -Remediation "Set FTPS Only or Disable FTP." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
+    }
+    if ($notEval.Count -gt 0 -and $ftpOpen.Count -gt 0) {
+        Write-Finding -Severity "MEDIUM" -Status "NOTEVALUATED" -CheckId "COMPUTE-006" `
+                      -Message "App Service FTP state could not be fully evaluated (collection or per-app reads failed); not reported as clean" `
+                      -Count $notEval.Count -CountType "NotEvaluatedItems" -Data $notEval -Service "AppService" `
+                      -Remediation "Ensure Microsoft.Web/sites/read on all in-scope subscriptions and re-run." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple"
+    }
+}
+
+function Test-RecoveryServicesBackupSupported {
+    <#
+    .SYNOPSIS
+        Detects once per session whether the Az.RecoveryServices cmdlets needed
+        for VM backup coverage are available. Result is cached in script scope;
+        tests may preset $script:RecoveryServicesBackupSupported. Same
+        feature-detection pattern as Test-StorageSasPolicySupported.
+    #>
+    [CmdletBinding()]
+    param()
+    $cached = Get-Variable -Name 'RecoveryServicesBackupSupported' -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if ($null -ne $cached) {
+        return [bool]$cached
+    }
+    $supported = $false
+    try {
+        $supported = [bool]((Get-Command -Name Get-AzRecoveryServicesVault -ErrorAction SilentlyContinue) -and
+                            (Get-Command -Name Get-AzRecoveryServicesBackupItem -ErrorAction SilentlyContinue))
+    }
+    catch {
+        $supported = $false
+    }
+    $script:RecoveryServicesBackupSupported = $supported
+    return $supported
+}
+
+function Test-VMBackupCoverage {
+    <#
+    .SYNOPSIS
+        COMPUTE-007 - VM backup coverage. VMs without a Recovery Services vault
+        backup item -> MEDIUM control-gap finding (never auto-escalated; test /
+        sandbox exemptions are an operator decision). One per-subscription vault
+        + protected-item enumeration (never per-VM calls). Missing module /
+        cmdlet support or a failed vault/item read -> NOTEVALUATED, never clean.
+    #>
+    param(
+        [array]$Subscriptions,
+        [hashtable]$Exclusions,
+        [int]$ProgressId = 0
+    )
+
+    Write-Section -Title "VIRTUAL MACHINES - BACKUP COVERAGE" -Color "Yellow" -ProgressId $ProgressId
+
+    # Feature-detect module support (Az.RecoveryServices not in RequiredModules
+    # on purpose: a missing module must surface as NotEvaluated, not a skip).
+    if (-not (Test-RecoveryServicesBackupSupported)) {
+        Write-Finding -Severity "MEDIUM" -Status "NOTEVALUATED" -CheckId "COMPUTE-007" `
+                      -Message "VM backup coverage not evaluated: Az.RecoveryServices cmdlets unavailable (module support missing)" `
+                      -Count 0 -Data $null -Service "Compute" `
+                      -Remediation "Install the Az.RecoveryServices module and re-run to evaluate VM backup coverage." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple"
+        return
+    }
+
+    $unprotected = New-Object System.Collections.Generic.List[object]
+    $notEval     = New-Object System.Collections.Generic.List[object]
+    $subsEvaluated = New-Object System.Collections.Generic.List[string]
+    $subsSkipped   = New-Object System.Collections.Generic.List[string]
+    $totalVMs = 0
+    $evaluatedVMs = 0
+    $totalProcessed = 0
+
+    foreach ($sub in $Subscriptions) {
+        $totalProcessed++
+        Write-Progress -Activity "Checking VM backup coverage" `
+                      -Status "Subscription: $($sub.Name)" `
+                      -PercentComplete (Get-SafeProgressPercent -Current $totalProcessed -Total $Subscriptions.Count) `
+                      -Id $ProgressId
+
+        $inv = Get-SubscriptionInventory -SubscriptionId $sub.Id -SubscriptionName $sub.Name -TenantId $sub.TenantId -Kind VirtualMachines
+        if ($inv.Unavailable) {
+            if ($inv.UnavailableReason -eq 'ContextSwitch') { $subsSkipped.Add($sub.Name) }
+            else { $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name; Reason = 'VM collection failed' }) }
+            continue
+        }
+
+        # One per-subscription vault enumeration + one protected-item read per
+        # vault (never per-VM). Any failure leaves coverage unproven for this
+        # subscription -> NotEvaluated, not clean.
+        $backupUnknown = $false
+        $protectedVmIds = @{}
+        try {
+            $vaults = Invoke-AzureCommand -Command {
+                Get-AzRecoveryServicesVault -ErrorAction Stop
+            } -CommandName "Get-RecoveryVaults" -SkipContextCheck
+            # -VaultId is the current parameter; older Az.RecoveryServices
+            # versions take -ResourceGroupName/-Name instead. Feature-detect
+            # once per subscription.
+            $itemCmd = Get-Command -Name Get-AzRecoveryServicesBackupItem -ErrorAction SilentlyContinue
+            $useVaultId = [bool]($itemCmd -and $itemCmd.Parameters -and $itemCmd.Parameters.ContainsKey('VaultId'))
+            foreach ($vault in @($vaults)) {
+                if ($useVaultId) {
+                    $items = Invoke-AzureCommand -Command {
+                        Get-AzRecoveryServicesBackupItem -VaultId $vault.ID -WorkloadType AzureVM -ErrorAction Stop
+                    } -CommandName "Get-RecoveryBackupItems" -SkipContextCheck
+                }
+                else {
+                    $items = Invoke-AzureCommand -Command {
+                        Get-AzRecoveryServicesBackupItem -ResourceGroupName $vault.ResourceGroupName -Name $vault.Name -WorkloadType AzureVM -ErrorAction Stop
+                    } -CommandName "Get-RecoveryBackupItems" -SkipContextCheck
+                }
+                foreach ($item in @($items)) {
+                    $vmId = $null
+                    if ($item.PSObject.Properties.Name -contains 'VirtualMachineId' -and $item.VirtualMachineId) { $vmId = "$($item.VirtualMachineId)" }
+                    elseif ($item.PSObject.Properties.Name -contains 'SourceResourceId' -and $item.SourceResourceId) { $vmId = "$($item.SourceResourceId)" }
+                    if ($vmId) { $protectedVmIds[$vmId.ToLowerInvariant()] = $true }
+                }
+            }
+        }
+        catch {
+            Write-AuditLog -Message "Backup vault/item read failed in subscription $($sub.Name): $_" -Level WARN
+            $backupUnknown = $true
+        }
+
+        if ($backupUnknown) {
+            $notEval.Add([PSCustomObject]@{ SubscriptionName = $sub.Name; Reason = 'Recovery Services vault or protected-item read failed' })
+            continue
+        }
+
+        $subsEvaluated.Add($sub.Name)
+        $totalVMs += @($inv.Items).Count
+
+        foreach ($vm in $inv.Items) {
+            $evaluatedVMs++
+            $vmId = "$($vm.Id)".ToLowerInvariant()
+            if (-not ($vmId -and $protectedVmIds.ContainsKey($vmId))) {
+                $unprotected.Add([PSCustomObject]@{
+                    SubscriptionId   = $sub.Id
+                    SubscriptionName = $sub.Name
+                    ResourceGroup    = $vm.ResourceGroupName
+                    VMName           = $vm.Name
+                    PowerState       = "$($vm.PowerState)"
+                })
+            }
+        }
+    }
+
+    $cov = New-AzureCheckCoverage -Discovered $totalVMs -Evaluated $evaluatedVMs -SkippedResources 0 `
+        -CollectionFailures $notEval -SkippedSubscriptions $subsSkipped -EvaluatedSubscriptions $subsEvaluated `
+        -Risky $unprotected.Count -ResourceNoun 'virtual machines'
+    $covParams = New-AzureCheckCoverageParams -Coverage $cov -Discovered $totalVMs -Evaluated $evaluatedVMs `
+        -SkippedResources 0 -SkippedSubscriptions $subsSkipped -EvaluatedSubscriptions $subsEvaluated `
+        -ApiSources @('ARM Get-AzVM', 'ARM Get-AzRecoveryServicesVault', 'ARM Get-AzRecoveryServicesBackupItem (AzureVM)') `
+        -FindingType 'ControlGap'
+
+    if ($unprotected.Count -gt 0) {
+        Write-Finding -Severity "MEDIUM" -Status "FAIL" -CheckId "COMPUTE-007" `
+                      -Message "Virtual machines without Recovery Services vault backup (control gap)" `
+                      -Count $unprotected.Count -CountType "UniqueResources" -Data $unprotected -Service "Compute" `
+                      -SeverityReason 'Control gap only, deliberately MEDIUM: no direct exploit path, and test/sandbox VMs may be intentionally unprotected - validate before treating as a defect.' `
+                      -Remediation "Enable Azure Backup for production VMs; document intentional exclusions for test/sandbox workloads." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
+    }
+    else {
+        $severity = if ($cov.Severity) { $cov.Severity } else { 'MEDIUM' }
+        $evidence = if ($notEval.Count -gt 0) { $notEval } else { $null }
+        Write-Finding -Severity $severity -Status $cov.Status -CheckId "COMPUTE-007" `
+                      -Message "Virtual machines without Recovery Services vault backup (control gap)" `
+                      -Count 0 -Data $evidence -Service "Compute" `
+                      -Remediation "Enable Azure Backup for production VMs." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" @covParams
+    }
+    if ($notEval.Count -gt 0 -and $unprotected.Count -gt 0) {
+        Write-Finding -Severity "MEDIUM" -Status "NOTEVALUATED" -CheckId "COMPUTE-007" `
+                      -Message "VM backup coverage could not be fully evaluated (vault/item reads failed); not reported as clean" `
+                      -Count $notEval.Count -CountType "NotEvaluatedItems" -Data $notEval -Service "Compute" `
+                      -Remediation "Grant Microsoft.RecoveryServices/vaults/read and re-run." `
+                      -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple"
+    }
+}
+
 function Register-AzureComputeChecks {
     Register-AuditCheck -CheckId "COMPUTE-001" `
                         -Category "Azure" `
@@ -601,4 +946,26 @@ function Register-AzureComputeChecks {
                         -RequiredModules @("Az.Accounts", "Az.Websites") `
                         -Phase "PerSubscription" `
                         -RequiredResourceTypes @('Microsoft.Web/sites')
+
+    Register-AuditCheck -CheckId "COMPUTE-006" `
+                        -Category "Azure" `
+                        -Service "AppService" `
+                        -Name "App Service FTP State" `
+                        -Function ${function:Test-AppServiceFtpState} `
+                        -DefaultSeverity "MEDIUM" `
+                        -RequiredModules @("Az.Accounts", "Az.Websites") `
+                        -Phase "PerSubscription" `
+                        -RequiredResourceTypes @('Microsoft.Web/sites')
+
+    # Az.RecoveryServices is deliberately NOT in RequiredModules: a missing
+    # module must surface as NotEvaluated from inside the check, not a skip.
+    Register-AuditCheck -CheckId "COMPUTE-007" `
+                        -Category "Azure" `
+                        -Service "Compute" `
+                        -Name "VM Backup Coverage" `
+                        -Function ${function:Test-VMBackupCoverage} `
+                        -DefaultSeverity "MEDIUM" `
+                        -RequiredModules @("Az.Accounts", "Az.Compute") `
+                        -Phase "PerSubscription" `
+                        -RequiredResourceTypes @('Microsoft.Compute/virtualMachines')
 }
