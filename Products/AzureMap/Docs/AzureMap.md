@@ -1,7 +1,7 @@
 # AzureMap
 
 AzureMap is the **read-only** Azure (ARM control-plane) security assessment tool of the AzureMap/EntraMap family.
-It scans Azure subscriptions for misconfigurations, excessive permissions, and compliance gaps, models capability / attack-path risk from the results, and exports findings to CSV, JSON, and HTML. It never requests a Microsoft Graph token — for Entra ID tenant audits, use [EntraMap](../../EntraMap/Docs/EntraMap.md).
+It scans Azure subscriptions for misconfigurations, excessive permissions, and compliance gaps, models capability / attack-path risk from the results, and exports findings to CSV, JSON, and HTML. It never requests a Microsoft Graph token — EntraMap (Entra ID tenant audits) is parked for a future phase under [Future/EntraMap](../../../Future/EntraMap/).
 
 AzureMap never changes your environment. See [SAFETY.md](../../SAFETY.md) for the safety contract and [SAFE-RUN.md](../../SAFE-RUN.md) for the safe-run guide.
 
@@ -46,14 +46,15 @@ Useful switches:
 - `-RedactPublicIps` — mask public IP addresses in exports and console output.
 - `-VerboseOutput` / `-Quiet` / `-NoColor` — console behavior. The normal CLI stays clean: no raw finding blocks, no remediation commands, no module warnings.
 - `-ShowFindings` / `-ShowRemediation` / `-DetailedSummary` — opt-in detail that the clean CLI intentionally hides.
-- `-SeverityLevel`, `-Services` — scope findings/checks. The `-Services` ValidateSet still accepts the legacy Entra service names for CLI compatibility; they match zero checks here (Entra checks live in `entramap.ps1`).
+- `-SeverityLevel`, `-Services` — scope findings/checks. The `-Services` ValidateSet still accepts the legacy Entra service names for CLI compatibility; they match zero checks here (Entra checks live in EntraMap, parked under `Future/EntraMap`).
+- `-ReportLayout` — HTML report layout: `Pentester` (default) or the legacy `Classic` layout. JSON/CSV exports are unaffected.
 - `-ConfigPath`, `-ExclusionPath` — JSON config overrides and exclusion/baseline rules.
 - `-SkipModuleCheck` — skip Azure module dependency validation.
 
 Deprecated switches (kept for CLI compatibility; both refer to the split):
 
 - `-SkipEntra` — deprecated no-op: `azuremap.ps1` is always Azure-only now. An INFO note is logged when it is passed.
-- `-EntraOnly` — deprecated: prints guidance to use `entramap.ps1` and stops before any Azure work.
+- `-EntraOnly` — deprecated: prints a note that EntraMap is parked for a future phase (`Future/EntraMap`) and stops before any Azure work.
 
 ## What `-IncludeDataPlane` does — and does not do
 
@@ -127,7 +128,7 @@ The suite includes safety guards that grep the runtime source to prove no key/se
 
 ## More documentation
 
-- [EntraMap](../../EntraMap/Docs/EntraMap.md) — the Entra ID (Microsoft Graph) product
+- [EntraMap](../../../Future/EntraMap/Docs/EntraMap.md) — the Entra ID (Microsoft Graph) product (parked for a future phase)
 - [SAFE-RUN.md](../../SAFE-RUN.md) — safe-run guide and release smoke checklist
 - [SAFETY.md](../../SAFETY.md) — safety rules (what the tools may and may not do)
 - [ARCHITECTURE.md](../../ARCHITECTURE.md) — module layout, status×coverage contract, caching, capability model

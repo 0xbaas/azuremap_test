@@ -258,6 +258,29 @@ Describe "Banner and NoColor" {
         Assert-MockCalled Write-UiHost -ParameterFilter { "$Text" -match '0xbaas.com' }
     }
 
+    It "AzureMap banner shows version, 0xbaas.com and the severity line" {
+        $script:State.Config.Quiet = $false
+        Mock Write-UiHost {}
+        Show-AzureMapBanner -SeverityLevel 'All' -Services @('All')
+        Assert-MockCalled Write-UiHost -ParameterFilter { "$Text" -match '0xbaas\.com' }
+        Assert-MockCalled Write-UiHost -ParameterFilter { "$Text" -match 'AzureMap v2\.0' }
+        Assert-MockCalled Write-UiHost -ParameterFilter { "$Text" -match 'Severity: All' }
+    }
+
+    It "AzureMap banner is plain ASCII and suppressed under -Quiet" {
+        $script:State.Config.Quiet = $false
+        $script:ui = New-Object System.Collections.Generic.List[string]
+        Mock Write-UiHost { param($Text, $Color, $NoNewline) [void]$script:ui.Add("$Text") }
+        Show-AzureMapBanner -SeverityLevel 'All' -Services @('All')
+        foreach ($line in $script:ui) { $line | Should -Match '^[\x20-\x7E]*$' }
+        ($script:ui -join "`n") | Should -Match 'Written by 0xbaas\.com'
+
+        $script:ui.Clear()
+        $script:State.Config.Quiet = $true
+        Show-AzureMapBanner -SeverityLevel 'All' -Services @('All')
+        $script:ui.Count | Should -Be 0
+    }
+
     It "Write-UiHost omits color when Config.NoColor is set" {
         $script:State.Config.NoColor = $true
         Mock Write-Host {}

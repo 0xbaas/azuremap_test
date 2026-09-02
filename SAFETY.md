@@ -64,11 +64,11 @@ Actions) — but it never invokes that action.
   of exploitability, and never an attempt to prove it.
 - The model is per-product, on shared primitives (`Shared/Core/Capability.ps1`):
   Azure builders in `Products/AzureMap/Capability/CapabilityModel.Azure.ps1`, Entra builders in
-  `Products/EntraMap/Capability/CapabilityModel.Entra.ps1`. Both perform zero API calls.
+  `Future/EntraMap/Capability/CapabilityModel.Entra.ps1` (parked). Both perform zero API calls.
 
-## EntraMap safety model
+## EntraMap safety model (parked product)
 
-EntraMap reads Microsoft Graph metadata only. Concretely:
+EntraMap (parked under `Future/EntraMap/`) reads Microsoft Graph metadata only. Concretely:
 
 **NEVER retrieves:**
 
@@ -110,12 +110,13 @@ forbidden call patterns (key/secret/content retrieval, invocation cmdlets in
 the capability model) and fail the build if any appear. Static permission
 strings used for read-only modeling are explicitly allowed; invocation is not.
 `Tests/Shared/Phase25.Split.Tests.ps1` proves the product boundary itself: an
-AzureMap session contains no Graph token code, and an EntraMap session
+AzureMap session contains no Graph token code, and a (parked) EntraMap session
 contains no ARM discovery/scanning code.
-`Tests/EntraMap/Phase27.EntraCapability.Tests.ps1` extends the static guards to
-the whole Entra product surface (`Products/EntraMap/Core/`, `Products/EntraMap/Checks/`,
+`Future/EntraMap/Tests/Phase27.EntraCapability.Tests.ps1` (parked with the
+product) extends the static guards to
+the whole Entra product surface (`Future/EntraMap/Core/`, `Future/EntraMap/Checks/`,
 `entramap.ps1`): no write-verb Az/AzureAD/Mg cmdlets, no secret/key retrieval
 patterns, no non-GET Graph methods or `-AllowNonGet` outside
-`Products/EntraMap/Core/Graph.ps1`, no bare `Connect-AzAccount` invocation, and no
+`Future/EntraMap/Core/Graph.ps1`, no bare `Connect-AzAccount` invocation, and no
 Graph/Azure call surface at all in the Entra capability model (backed by a
 runtime test with every Graph/Azure entry point stubbed to throw).

@@ -405,11 +405,60 @@ function Show-Banner {
     Write-UiHost -Text ("  Severity: " + $SeverityLevel + "   Services: " + $servicesText) -Color Gray
 }
 
+function Show-AzureMapBanner {
+    <#
+    .SYNOPSIS
+        Displays the AzureMap ASCII startup banner (AzureMap product only).
+    .DESCRIPTION
+        The ASCII art lives in this one function so it can be swapped in a
+        single place. Plain ASCII only - it must render in a Windows
+        PowerShell 5.1 console. Prints the version from State.Metadata when
+        available, plus the severity/services line the legacy banner showed.
+        The shared Show-Banner stays untouched for other compositions.
+    .PARAMETER SeverityLevel
+        Current severity filter to display.
+    .PARAMETER Services
+        List of services being audited.
+    #>
+    [CmdletBinding()]
+    param(
+        [string]$SeverityLevel,
+        [string[]]$Services
+    )
+
+    if ($script:State.Config.Quiet) { return }
+
+    $art = @'
+     ___                         __  ___
+    /   |  ____  __  __________ /  |/  /___ _____
+   / /| | /_  / / / / / ___/ _ \/ /|_/ / __ `/ __ \
+  / ___ |  / /_/ /_/ / /  /  __/ /  / / /_/ / /_/ /
+ /_/  |_| /___/\__,_/_/   \___/_/  /_/\__,_/ .___/
+                                          /_/
+'@
+    foreach ($line in ($art -split "`r?`n")) {
+        Write-UiHost -Text $line -Color Cyan
+    }
+
+    $meta = $script:State.Metadata
+    $version = ''
+    if ($meta -and "$($meta.Version)") { $version = " v$($meta.Version)" }
+    $toolName = 'AzureMap'
+    if ($meta -and "$($meta.ToolName)") { $toolName = "$($meta.ToolName)" }
+
+    Write-UiHost -Text ("  {0}{1} - Azure Security Assessment" -f $toolName, $version) -Color Cyan
+    Write-UiHost -Text '  Written by 0xbaas.com' -Color DarkGray
+    Write-UiHost -Text ("  Started:  " + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Color Yellow
+    $servicesText = if ($Services -and $Services.Count -gt 0) { $Services -join ", " } else { "All" }
+    Write-UiHost -Text ("  Severity: " + $SeverityLevel + "   Services: " + $servicesText) -Color Gray
+    Write-UiHost -Text ''
+}
+
 function Show-RunContext {
     <#
     .SYNOPSIS
-        Prints the resolved run context (mode/account/tenant/scope) once
-        preflight has completed.
+        Prints the resolved run details (tenant/account/mode/data-plane/report
+        layout) once preflight has completed.
     #>
     [CmdletBinding()]
     param()
@@ -423,11 +472,15 @@ function Show-RunContext {
     $ten   = Protect-SensitiveText -Text $ten
     $mode  = Get-RunModeLabel
     $dpMode = if ($script:State.Config.IncludeDataPlane) { 'enabled (-IncludeDataPlane)' } else { 'disabled' }
+    $layout = "$($script:State.Config.ReportLayout)"
+    if (-not $layout) { $layout = 'Pentester' }
 
+    Write-UiHost -Text 'Run details' -Color Cyan
+    Write-UiHost -Text ("  Tenant:   " + $ten) -Color Gray
+    Write-UiHost -Text ("  Account:  " + $acct) -Color Gray
     Write-UiHost -Text ("  Mode:     " + $mode) -Color Gray
     Write-UiHost -Text ("  Data-plane checks: " + $dpMode) -Color Gray
-    Write-UiHost -Text ("  Account:  " + $acct) -Color Gray
-    Write-UiHost -Text ("  Tenant:   " + $ten) -Color Gray
+    Write-UiHost -Text ("  Report layout: " + $layout) -Color Gray
     Write-UiHost -Text ""
 }
 

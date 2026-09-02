@@ -1,13 +1,15 @@
-# AzureMap / EntraMap — Safe Run Guide
+# AzureMap — Safe Run Guide
 
-AzureMap and EntraMap are **read-only** security auditors. They inspect
-configuration and report findings. They do not change your environment.
+AzureMap is a **read-only** security auditor. It inspects
+configuration and reports findings. It does not change your environment.
+(EntraMap, the Entra ID product, is parked for a future phase under
+`Future/EntraMap/` — the same read-only rules apply to it.)
 
 ## Read-only by design
 
 By default the tools perform **only read/list/get** operations: AzureMap
-against Azure Resource Manager and Azure Resource Graph, EntraMap against
-Microsoft Graph. By design they do **not**:
+against Azure Resource Manager and Azure Resource Graph, the parked EntraMap
+against Microsoft Graph. By design they do **not**:
 
 - perform any write, create, update, or delete operations;
 - call `listKeys`, action endpoints, or otherwise read secret/key **values**;
@@ -29,9 +31,9 @@ token — the Graph code is not loaded into its session:
 Connect-AzAccount
 ```
 
-**EntraMap** needs a Microsoft Graph token, acquired through the Az context as
-the token vehicle. It performs no subscription discovery and no ARM resource
-scanning:
+**EntraMap** (parked under `Future/EntraMap/`) needs a Microsoft Graph token,
+acquired through the Az context as the token vehicle. It performs no
+subscription discovery and no ARM resource scanning:
 
 ```powershell
 Connect-AzAccount -AuthScope "https://graph.microsoft.com"
@@ -67,10 +69,12 @@ Relevant switches:
 - `-VerboseOutput` / `-DebugOutput` — more operational detail on the console.
   These add counts and labels only; they never print raw objects, tokens, or
   identifiers.
+- `-ReportLayout` — HTML report layout: `Pentester` (default) or the legacy
+  `Classic` layout. JSON/CSV exports are unaffected.
 - `-SkipEntra` — **deprecated no-op** (Azure-only is now the only mode); an
   INFO note is logged when passed.
-- `-EntraOnly` — **deprecated**: prints guidance to use `entramap.ps1` and
-  stops before any Azure work.
+- `-EntraOnly` — **deprecated**: prints a note that EntraMap is parked for a
+  future phase (`Future/EntraMap`) and stops before any Azure work.
 
 The console summary includes a **Capability insights** section (top 5): read-only
 modeling that connects findings into higher-order risk (public exposure +
@@ -79,17 +83,20 @@ capability graph is in the JSON export (`CapabilityModel`) and the HTML
 "Capability Insights" section. It is inference from collected metadata, not
 exploitation.
 
-## Common runs — EntraMap
+## Common runs — EntraMap (parked)
+
+EntraMap is parked for a future phase under `Future/EntraMap/` and is not part
+of the active workflow. To run it anyway:
 
 ```powershell
 # Full tenant audit (Microsoft Graph, GET-only).
-.\entramap.ps1 -VerboseOutput
+.\Future\EntraMap\run-entramap.ps1 -VerboseOutput
 
 # Include PIM eligible/active assignment checks (beta endpoints).
-.\entramap.ps1 -VerboseOutput -UseGraphBeta
+.\Future\EntraMap\run-entramap.ps1 -VerboseOutput -UseGraphBeta
 
 # Redact sensitive identifiers in console + exports.
-.\entramap.ps1 -VerboseOutput -RedactSensitive
+.\Future\EntraMap\run-entramap.ps1 -VerboseOutput -RedactSensitive
 ```
 
 Relevant switches:
@@ -115,13 +122,13 @@ exploitation.
 Run these in order before tagging a release. Steps 1–2 need no cloud access;
 steps 3–7 read your environment (read-only).
 
-- [ ] **1. Unit tests** — `Invoke-Pester -Path .\Tests -Output Normal` — all pass (whole tree: `.\Tests\AzureMap`, `.\Tests\EntraMap`, `.\Tests\Shared`; per-folder runs also work).
+- [ ] **1. Unit tests** — `Invoke-Pester -Path .\Tests -Output Normal` — all pass (whole tree: `.\Tests\AzureMap`, `.\Tests\Shared`; per-folder runs also work). EntraMap's tests are parked with the product (`Future/EntraMap/Tests`) and are not part of this run.
 - [ ] **2. Integration tests** — `Invoke-Pester -Path .\Tests\Integration -Output Normal` — all pass.
 - [ ] **3. AzureMap run** — `.\azuremap.ps1 -VerboseOutput`
 - [ ] **4. AzureMap data-plane run (optional)** — `.\azuremap.ps1 -VerboseOutput -IncludeDataPlane`
 - [ ] **5. AzureMap redaction run (optional)** — `.\azuremap.ps1 -VerboseOutput -RedactSensitive -RedactPublicIps`
-- [ ] **6. EntraMap run** — `Connect-AzAccount -AuthScope "https://graph.microsoft.com"`, then `.\entramap.ps1 -VerboseOutput`
-- [ ] **7. EntraMap redaction run (optional)** — `.\entramap.ps1 -VerboseOutput -RedactSensitive`
+- [ ] **6. EntraMap run (parked; skip unless un-parked)** — `Connect-AzAccount -AuthScope "https://graph.microsoft.com"`, then `.\Future\EntraMap\run-entramap.ps1 -VerboseOutput`
+- [ ] **7. EntraMap redaction run (parked; optional)** — `.\Future\EntraMap\run-entramap.ps1 -VerboseOutput -RedactSensitive`
 
 For each AzureMap run (3–5), verify:
 
@@ -192,8 +199,9 @@ Treat these files as sensitive:
 - Use `-RedactSensitive` / `-RedactPublicIps` when reports must leave the
   secured environment with identifiers masked.
 
-The supported entry points are `azuremap.ps1` (Azure) and `entramap.ps1`
-(Entra ID) — thin root wrappers that pass all parameters through to the real
-entrypoints in `Products/AzureMap/` and `Products/EntraMap/`, which load the
-modular `Shared/Core/`, per-product `Core/`/`Capability/`/`Checks/`, and
-`Shared/Export/` components.
+The supported active entry point is `azuremap.ps1` (Azure) — a thin root
+wrapper that passes all parameters through to the real entrypoint in
+`Products/AzureMap/`, which loads the modular `Shared/Core/`,
+`Core/`/`Capability/`/`Checks/`, and `Shared/Export/` components. The Entra ID
+entrypoint is parked under `Future/EntraMap/` (`run-entramap.ps1` → sibling
+`entramap.ps1`) and is not part of the active workflow.

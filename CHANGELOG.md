@@ -2,6 +2,27 @@
 
 All notable AzureMap phases, newest first. Tags mark each accepted phase.
 
+## Unreleased — standalone AzureMap UX pass
+
+- **Pentester is now the default HTML report layout.** No `-ReportLayout`
+  gives the Pentester dashboard; `-ReportLayout Classic` selects the legacy
+  layout (byte-unchanged). JSON/CSV exports are unaffected.
+- **End-of-run report locations**: after the summary the CLI prints the full
+  absolute path of the HTML report ("You can view the findings report
+  here:"), the other exports, and a closing "Done." line.
+- **AzureMap ASCII banner + run details**: new `Show-AzureMapBanner`
+  (ASCII art in one swappable function, "Written by 0xbaas.com", version from
+  state metadata) replaces the box banner in `azuremap.ps1`; `Show-RunContext`
+  gains a "Run details" header and a "Report layout" line.
+- **EntraMap parked**: the EntraMap product moved out of the active workflow
+  to `Future/EntraMap/` (entrypoint, Core/Capability/Checks, Docs, and its
+  tests under `Future/EntraMap/Tests`). The root `entramap.ps1` wrapper moved
+  with it as `Future/EntraMap/run-entramap.ps1`. `Products/` now holds only
+  AzureMap; the repo root has only the `azuremap.ps1` active wrapper.
+  `-EntraOnly` / `-SkipEntra` messages and the AzureMap help text now point at
+  the parked location. EntraMap tests no longer run under
+  `Invoke-Pester -Path ./Tests`.
+
 ## Unreleased — AzureMap reliability + parity pass
 
 - P0 finding-evidence fixes:

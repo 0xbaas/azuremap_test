@@ -22,7 +22,7 @@ function Invoke-EntraCollection {
     Write-Section -Title "Entra ID Data Collection" -Color Cyan
 
     # ---- Load reference data ----
-    # This file lives in Products\EntraMap\Checks; the repo root is three
+    # This file lives in Future\EntraMap\Checks; the repo root is three
     # levels up (ReferenceData stays at the repo root).
     $scriptRoot = $PSScriptRoot
     $repoRoot   = (Resolve-Path (Join-Path $scriptRoot "..\..\.." )).Path

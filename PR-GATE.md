@@ -5,8 +5,8 @@ All gates must pass before merge. Tick each box when verified.
 ---
 
 ## Gate 0: Repository Structure
-- [x] Folder layout matches spec (`Products/AzureMap/`, `Products/EntraMap/`, `Shared/Core/`, `Shared/Export/`, `Tests/`, `ReferenceData/`)
-- [x] `azuremap.ps1` and `entramap.ps1` entrypoints exist and dot-source their product modules
+- [x] Folder layout matches spec (`Products/AzureMap/`, `Future/EntraMap/` (parked), `Shared/Core/`, `Shared/Export/`, `Tests/`, `ReferenceData/`)
+- [x] `azuremap.ps1` entrypoint exists and dot-sources its product modules; the EntraMap entrypoint is parked under `Future/EntraMap/`
 - [x] `Shared/Core/State.ps1` initializes `$script:State` with all required sub-structures
 - [x] `Shared/Core/Logging.ps1`, `Shared/Core/Config.ps1`, `Shared/Core/Exclusions.ps1` present
 - [x] `Shared/Export/` modules for CSV, JSON, HTML exist
@@ -31,7 +31,7 @@ All gates must pass before merge. Tick each box when verified.
 - [x] `Show-AuditSummary` prints final statistics
 
 ## Gate 4: Entra Design Compliance
-- [x] `Invoke-EntraCollection` called ONCE, outside subscription loops (via `Invoke-AzureMapCollection` in `Products/EntraMap/Core/Collection.ps1`, invoked by `entramap.ps1`)
+- [x] `Invoke-EntraCollection` called ONCE, outside subscription loops (via `Invoke-AzureMapCollection` in `Future/EntraMap/Core/Collection.ps1` (parked), invoked by `entramap.ps1`)
 - [x] TenantWide checks do NOT run inside per-subscription loops
 - [x] No Entra check file (except `Collect.ps1`) calls `Invoke-GraphCommand` or `Invoke-GraphBatch`
 - [x] PIM endpoints (`roleEligibilitySchedules`, `roleAssignmentSchedules`) use beta API version

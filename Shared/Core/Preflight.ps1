@@ -4,8 +4,8 @@
 # Microsoft Graph. The product entrypoints use the dedicated variants instead:
 # Core/Azure/Preflight.Azure.ps1 (Test-AzureAuthPreflight; ARM-required, never
 # probes Graph, also hosts Test-AzureSubscriptionScope) and
-# Products/EntraMap/Core/Preflight.Entra.ps1 (Test-EntraAuthPreflight; Graph-required,
-# ARM context optional).
+# Future/EntraMap/Core/Preflight.Entra.ps1 (Test-EntraAuthPreflight; Graph-required,
+# ARM context optional; EntraMap parked).
 #
 # Guarantees:
 #   * Never calls Connect-AzAccount automatically.

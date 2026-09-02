@@ -5,13 +5,15 @@
     AzureMap scans Azure subscriptions for security misconfigurations,
     excessive permissions, and compliance gaps on the ARM control plane
     (read-only; no Microsoft Graph required). Results are exported to CSV,
-    JSON, and HTML. For Entra ID tenant audits, use entramap.ps1.
+    JSON, and HTML. EntraMap (Entra ID tenant audits) is parked for a future
+    phase under Future/EntraMap.
 .PARAMETER SeverityLevel
     Filter findings by severity threshold.
 .PARAMETER Services
     Limit audit scope to specific service areas. The ValidateSet still
     accepts the Entra service names for CLI compatibility; they simply
-    match zero checks here (Entra checks live in entramap.ps1).
+    match zero checks here (Entra checks live in EntraMap, parked under
+    Future/EntraMap).
 .PARAMETER ConfigPath
     Path to an optional JSON configuration override file.
 .PARAMETER ExclusionPath
@@ -37,13 +39,14 @@
     Skip Azure PowerShell module dependency validation.
 .PARAMETER SkipEntra
     DEPRECATED no-op: azuremap.ps1 is always Azure-only now (Entra checks
-    moved to entramap.ps1). Accepted for CLI compatibility.
+    live in EntraMap, parked under Future/EntraMap). Accepted for CLI
+    compatibility.
 .PARAMETER EntraOnly
-    DEPRECATED: prints guidance to use entramap.ps1 and stops before any
-    Azure work.
+    DEPRECATED: prints a note that EntraMap is parked for a future phase
+    (Future/EntraMap) and stops before any Azure work.
 .PARAMETER ReportLayout
-    HTML report layout: 'Classic' (default) or the opt-in 'Pentester'
-    dashboard layout. JSON/CSV exports are unaffected.
+    HTML report layout: 'Pentester' (default) dashboard layout or the legacy
+    'Classic' layout. JSON/CSV exports are unaffected.
 #>
 [CmdletBinding()]
 param(
@@ -76,7 +79,7 @@ param(
     [switch]$RedactPublicIps,
 
     [ValidateSet('Classic', 'Pentester')]
-    [string]$ReportLayout = 'Classic'
+    [string]$ReportLayout = 'Pentester'
 )
 
 # NOTE: Version 1.0 (not Latest). AzureMap uses PowerShell 7-style soft member
@@ -178,17 +181,17 @@ try {
     if ($DebugOutput) { $DebugPreference = 'Continue' }
 
     # 2. Banner
-    Show-Banner -SeverityLevel $SeverityLevel -Services $Services
+    Show-AzureMapBanner -SeverityLevel $SeverityLevel -Services $Services
 
     # 2.5 Deprecated switches (migration path; no broken automation).
     #     -EntraOnly stops BEFORE any Azure work with guidance; -SkipEntra is a
     #     no-op because Azure-only is now the only mode of this entrypoint.
     if ($EntraOnly) {
-        Write-AuditLog -Message "-EntraOnly is no longer supported by azuremap.ps1. For Entra ID (Microsoft Graph) tenant audits, use entramap.ps1." -Level WARN -ForceConsole
+        Write-AuditLog -Message "-EntraOnly is no longer supported by azuremap.ps1. EntraMap (Entra ID tenant audits) is parked for a future phase (Future/EntraMap) and is not part of the active workflow." -Level WARN -ForceConsole
         return
     }
     if ($SkipEntra) {
-        Write-AuditLog -Message "-SkipEntra is deprecated and ignored: azuremap.ps1 is always Azure-only (Entra checks moved to entramap.ps1)." -Level INFO -ForceConsole
+        Write-AuditLog -Message "-SkipEntra is deprecated and ignored: azuremap.ps1 is always Azure-only (Entra checks live in EntraMap, parked under Future/EntraMap)." -Level INFO -ForceConsole
     }
 
     # 3. Module dependency check

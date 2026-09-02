@@ -877,21 +877,22 @@ function Show-AuditConsole {
     }
     Write-ConsoleLine ("  Total runtime       {0}" -f (Format-UiDuration $perf.TotalSeconds)) 'DarkGray'
 
-    # ---- Exported Files ----
+    # ---- Report locations (full paths) ----
     Write-ConsoleLine ''
-    Write-ConsoleLine 'Exports' 'Cyan'
-    if ($ExportedFiles -and $ExportedFiles.Count -gt 0) {
-        foreach ($file in $ExportedFiles) {
-            $leaf = Split-Path -Path "$file" -Leaf
-            $kind = switch -Regex ("$leaf") {
-                '\.html$'          { 'HTML' }
-                '\.json$'          { 'JSON' }
-                '-Detailed\.csv$'  { 'CSV (detailed)' }
-                '\.csv$'           { 'CSV' }
-                default            { 'File' }
-            }
-            Write-UiHost -Text ("  {0,-15}" -f $kind) -Color Cyan -NoNewline
-            Write-ConsoleLine $leaf
+    $htmlFile   = $null
+    $otherFiles = @()
+    foreach ($file in @($ExportedFiles)) {
+        if ("$file" -match '\.html$') { $htmlFile = "$file" } else { $otherFiles += "$file" }
+    }
+    if ($htmlFile) {
+        Write-ConsoleLine ("Report written to: {0}" -f $htmlFile) 'Cyan'
+        Write-ConsoleLine 'You can view the findings report here:' 'Cyan'
+        Write-ConsoleLine ("  {0}" -f $htmlFile)
+    }
+    Write-ConsoleLine 'Exports written to:' 'Cyan'
+    if ($otherFiles.Count -gt 0) {
+        foreach ($f in $otherFiles) {
+            Write-ConsoleLine ("  {0}" -f $f)
         }
     } else {
         Write-ConsoleLine "  (none)"
@@ -902,4 +903,5 @@ function Show-AuditConsole {
     }
 
     Write-ConsoleLine ''
+    Write-ConsoleLine 'Done.' 'Cyan'
 }

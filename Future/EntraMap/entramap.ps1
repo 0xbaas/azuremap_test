@@ -108,8 +108,9 @@ $env:SuppressAzurePowerShellBreakingChangeWarnings = 'true'
 
 #region ---- Dot-source all modules ----
 
-# Layout: this script lives in Products\EntraMap; the repo root is two levels
-# up. Shared modules come from Shared\, product modules from this directory.
+# Layout: this script lives in Future\EntraMap (EntraMap is parked for a
+# future phase); the repo root is two levels up, so Shared\ still resolves.
+# Shared modules come from Shared\, product modules from this directory.
 $scriptRoot = $PSScriptRoot
 $repoRoot   = Split-Path -Path (Split-Path -Path $scriptRoot -Parent) -Parent
 

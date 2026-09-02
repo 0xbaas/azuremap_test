@@ -17,9 +17,9 @@ BeforeAll {
     . "$projectRoot\Shared\Core\Logging.ps1"
     . "$projectRoot\Shared\Core\Exclusions.ps1"
     . "$projectRoot\Shared\Core\CheckRegistry.ps1"
-    . "$projectRoot\Products\EntraMap\Core\TenantWide.ps1"
-    . "$projectRoot\Products\EntraMap\Core\Collection.ps1"
-    . "$projectRoot\Products\EntraMap\Checks\TenantIdentity.ps1"
+    . "$projectRoot\Future\EntraMap\Core\TenantWide.ps1"
+    . "$projectRoot\Future\EntraMap\Core\Collection.ps1"
+    . "$projectRoot\Future\EntraMap\Checks\TenantIdentity.ps1"
 
     $script:State = Initialize-EntraAuditState
     $script:State.Config.Quiet         = $true

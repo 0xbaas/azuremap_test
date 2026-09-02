@@ -7,7 +7,8 @@
 #==============================================================================
 
 BeforeAll {
-    $projectRoot = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
+    # Parked under Future/EntraMap/Tests: repo root is three levels up.
+    $projectRoot = Split-Path -Path (Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent) -Parent
 
     . "$projectRoot\Shared\Core\State.ps1"
     . "$projectRoot\Shared\Core\Logging.ps1"
@@ -15,7 +16,7 @@ BeforeAll {
     . "$projectRoot\Shared\Core\CheckRegistry.ps1"
 
     # Load Entra check + registration functions (definitions + target functions).
-    Get-ChildItem -Path "$projectRoot\Products\EntraMap\Checks\*.ps1" -File | ForEach-Object { . $_.FullName }
+    Get-ChildItem -Path "$projectRoot\Future\EntraMap\Checks\*.ps1" -File | ForEach-Object { . $_.FullName }
 
     $script:State = Initialize-AuditState
     $script:State.Config.Quiet = $true

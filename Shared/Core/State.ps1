@@ -119,9 +119,9 @@ function Initialize-AuditState {
             IncludeDataPlane = $false
             RedactSensitive = $false
             RedactPublicIps = $false
-            # HTML report layout: 'Classic' (default, byte-stable) or the opt-in
-            # 'Pentester' dashboard layout (Shared/Export/HtmlPentester.ps1).
-            ReportLayout   = 'Classic'
+            # HTML report layout: 'Pentester' (default dashboard layout,
+            # Shared/Export/HtmlPentester.ps1) or the legacy 'Classic' layout.
+            ReportLayout   = 'Pentester'
 
             RBACSeverity = @{
                 "Owner"                        = @{ Root = "CRITICAL"; ManagementGroup = "CRITICAL"; Subscription = "HIGH";   ResourceGroup = "MEDIUM" }
@@ -319,7 +319,7 @@ function Initialize-EntraAuditState {
     # --- Entra ID / tenant-wide data ---
     $State.Entra = $null
 
-    # EntraMap tenant footprint (Products/EntraMap/Core/Footprint.Entra.ps1): safe read-only
+    # EntraMap tenant footprint (Future/EntraMap/Core/Footprint.Entra.ps1, parked): safe read-only
     # Graph metadata (tenant/account + per-dimension counts with per-dimension
     # availability). $null until Build-EntraFootprint runs; drives the
     # "Discovery" CLI block. In-memory only.

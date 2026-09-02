@@ -8,7 +8,7 @@
 #   Test-RBACDecomposition         (IDENTITY-007)
 #   Register-AzureIdentityChecks
 # (IDENTITY-001/002/004 - tenant credential hygiene - relocated to
-#  Products/EntraMap/Checks/TenantIdentity.ps1 for the EntraMap product split.)
+#  Future/EntraMap/Checks/TenantIdentity.ps1 with the parked EntraMap product.)
 # ============================================================================
 
 function Test-ExcessiveRBAC {

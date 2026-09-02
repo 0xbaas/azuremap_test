@@ -20,13 +20,14 @@
 #   (f) caps, dedupe, sorting, sequential CAP ids, evidence non-mutation
 #   (g) CLI top-5 rendering, HTML capability section (Entra-flavored intro),
 #       JSON CapabilityModel shape
-#   (h) safety contract: static analysis of Products/EntraMap/Core, Products/EntraMap/Checks and
+#   (h) safety contract: static analysis of Future/EntraMap/Core, Future/EntraMap/Checks and
 #       entramap.ps1 (read-only; no write verbs, no secret retrieval, no
 #       non-GET outside the Graph batch envelope, no bare Connect-AzAccount)
 #==============================================================================
 
 BeforeAll {
-    $projectRoot = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
+    # Parked under Future/EntraMap/Tests: repo root is three levels up.
+    $projectRoot = Split-Path -Path (Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent) -Parent
 
     . "$projectRoot\Shared\Core\State.ps1"
     . "$projectRoot\Shared\Core\Logging.ps1"
@@ -36,7 +37,7 @@ BeforeAll {
     . "$projectRoot\Shared\Core\RunStatus.ps1"
     . "$projectRoot\Shared\Core\CheckRegistry.ps1"
     . "$projectRoot\Shared\Core\Capability.ps1"
-    . "$projectRoot\Products\EntraMap\Capability\CapabilityModel.Entra.ps1"
+    . "$projectRoot\Future\EntraMap\Capability\CapabilityModel.Entra.ps1"
     . "$projectRoot\Shared\Core\Console.ps1"
     . "$projectRoot\Shared\Export\Html.ps1"
     . "$projectRoot\Shared\Export\Json.ps1"
@@ -452,10 +453,10 @@ Describe "Entra product safety contract (static analysis)" {
     BeforeAll {
         $script:GraphTransportFiles = @('Graph.ps1', 'Footprint.Entra.ps1')
         $script:EntraProductFiles = @(
-            Get-ChildItem -Path (Join-Path $projectRoot 'Products\EntraMap\Core\*.ps1') -File
-            Get-ChildItem -Path (Join-Path $projectRoot 'Products\EntraMap\Capability\*.ps1') -File
-            Get-ChildItem -Path (Join-Path $projectRoot 'Products\EntraMap\Checks\*.ps1') -File
-            Get-Item -Path (Join-Path $projectRoot 'Products\EntraMap\entramap.ps1')
+            Get-ChildItem -Path (Join-Path $projectRoot 'Future\EntraMap\Core\*.ps1') -File
+            Get-ChildItem -Path (Join-Path $projectRoot 'Future\EntraMap\Capability\*.ps1') -File
+            Get-ChildItem -Path (Join-Path $projectRoot 'Future\EntraMap\Checks\*.ps1') -File
+            Get-Item -Path (Join-Path $projectRoot 'Future\EntraMap\entramap.ps1')
         )
     }
 
@@ -497,7 +498,7 @@ Describe "Entra product safety contract (static analysis)" {
         }
     }
 
-    It "no non-GET Graph methods and no -AllowNonGet outside Products/EntraMap/Core/Graph.ps1" {
+    It "no non-GET Graph methods and no -AllowNonGet outside Future/EntraMap/Core/Graph.ps1" {
         foreach ($file in $script:EntraProductFiles) {
             if ($file.Name -eq 'Graph.ps1') { continue }
             $code = Get-StrippedCode -Path $file.FullName
@@ -509,7 +510,7 @@ Describe "Entra product safety contract (static analysis)" {
     }
 
     It "Graph.ps1 forces every /`$batch inner request to GET" {
-        $code = Get-StrippedCode -Path (Join-Path $projectRoot 'Products\EntraMap\Core\Graph.ps1')
+        $code = Get-StrippedCode -Path (Join-Path $projectRoot 'Future\EntraMap\Core\Graph.ps1')
         $code | Should -Match 'method\s*=\s*"GET"'
     }
 
@@ -522,7 +523,7 @@ Describe "Entra product safety contract (static analysis)" {
     }
 
     It "CapabilityModel.Entra.ps1 itself contains no Graph/Azure call surface at all" {
-        $code = Get-StrippedCode -Path (Join-Path $projectRoot 'Products\EntraMap\Capability\CapabilityModel.Entra.ps1')
+        $code = Get-StrippedCode -Path (Join-Path $projectRoot 'Future\EntraMap\Capability\CapabilityModel.Entra.ps1')
         $code | Should -Not -Match '\b(Get-Az|Invoke-Az)[A-Za-z]'
         foreach ($pattern in @('Invoke-GraphCommand', 'Invoke-GraphBatch', 'Get-GraphToken', 'Invoke-RestMethod', 'Invoke-WebRequest')) {
             $code.Contains($pattern) | Should -BeFalse -Because "CapabilityModel.Entra.ps1 must never reference '$pattern'"

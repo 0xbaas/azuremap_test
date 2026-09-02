@@ -164,6 +164,11 @@ Describe "CLI scope and assessment plan show the data-plane mode" {
         ($script:ui -join "`n") | Should -Match 'Data-plane checks: enabled'
     }
 
+    It "run context shows the report layout (Pentester by default)" {
+        Show-RunContext
+        ($script:ui -join "`n") | Should -Match 'Report layout: Pentester'
+    }
+
     It "assessment plan counts gated data-plane checks separately when disabled" {
         function global:Test-DpPlan { param([array]$Subscriptions) }
         Register-AuditCheck -CheckId 'ZZ-DP-PLAN' -Category 'Azure' -Service 'Storage' -Name 'dp plan' `

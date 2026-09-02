@@ -336,6 +336,21 @@ Describe "Show-AuditConsole - final Check results section is opt-in" {
         $all | Should -Match 'Check results'
         $all | Should -Match 'STORAGE-001'
     }
+
+    It "report locations block prints full paths and the Done line" {
+        Show-AuditConsole -ExportedFiles @(
+            'C:\out\AzureSecurityAudit-20990101-000000.html',
+            'C:\out\AzureSecurityAudit-20990101-000000.csv'
+        )
+        $all = $script:ui -join "`n"
+        $all | Should -Match 'Report written to: C:\\out\\AzureSecurityAudit-20990101-000000\.html'
+        $all | Should -Match 'You can view the findings report here:'
+        $all | Should -Match 'Exports written to:'
+        $all | Should -Match 'AzureSecurityAudit-20990101-000000\.csv'
+        $all | Should -Match 'Done\.'
+        # the HTML path must not be duplicated under the exports list
+        @($script:ui | Where-Object { "$_" -match 'AzureSecurityAudit-20990101-000000\.html' }).Count | Should -Be 2
+    }
 }
 
 Describe "Exports preserve detailed evidence and internal statuses" {

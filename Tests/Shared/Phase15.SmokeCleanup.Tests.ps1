@@ -20,7 +20,7 @@ BeforeAll {
     . "$projectRoot\Shared\Core\RunStatus.ps1"
     . "$projectRoot\Shared\Core\CheckRegistry.ps1"
     . "$projectRoot\Products\AzureMap\Core\Rbac.ps1"
-    . "$projectRoot\Products\EntraMap\Core\TenantWide.ps1"
+    . "$projectRoot\Future\EntraMap\Core\TenantWide.ps1"
     . "$projectRoot\Products\AzureMap\Core\InventoryCache.ps1"
     . "$projectRoot\Products\AzureMap\Checks\Storage.ps1"
     . "$projectRoot\Products\AzureMap\Checks\StorageKey.ps1"
@@ -304,7 +304,7 @@ Describe "Phase15 - B1 smoke cleanup" {
             # Belt-and-braces over the session pin: the PS 5.1 "Script Execution
             # Risk" Y/A/N prompt must be impossible even if the pin is lost.
             $repoRoot = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
-            $graph = Get-Content (Join-Path $repoRoot 'Products\EntraMap\Core\Graph.ps1') -Raw
+            $graph = Get-Content (Join-Path $repoRoot 'Future\EntraMap\Core\Graph.ps1') -Raw
             $callCount = ([regex]::Matches($graph, 'Invoke-RestMethod')).Count
             $callCount | Should -BeGreaterThan 0
             ([regex]::Matches($graph, 'UseBasicParsing')).Count | Should -BeGreaterOrEqual $callCount

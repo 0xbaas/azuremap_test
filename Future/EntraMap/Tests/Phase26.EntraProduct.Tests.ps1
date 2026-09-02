@@ -20,7 +20,8 @@
 #==============================================================================
 
 BeforeAll {
-    $projectRoot = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
+    # Parked under Future/EntraMap/Tests: repo root is three levels up.
+    $projectRoot = Split-Path -Path (Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent) -Parent
 
     . "$projectRoot\Shared\Core\State.ps1"
     . "$projectRoot\Shared\Core\Logging.ps1"
@@ -28,8 +29,8 @@ BeforeAll {
     . "$projectRoot\Shared\Core\Exclusions.ps1"
     . "$projectRoot\Shared\Core\Retry.ps1"
     . "$projectRoot\Shared\Core\RunStatus.ps1"
-    . "$projectRoot\Products\EntraMap\Core\Graph.ps1"
-    . "$projectRoot\Products\EntraMap\Core\Footprint.Entra.ps1"
+    . "$projectRoot\Future\EntraMap\Core\Graph.ps1"
+    . "$projectRoot\Future\EntraMap\Core\Footprint.Entra.ps1"
     . "$projectRoot\Shared\Core\CheckRegistry.ps1"
     . "$projectRoot\Shared\Core\Console.ps1"
 
@@ -47,7 +48,7 @@ BeforeAll {
     }
 
     # Entra check modules (registration metadata + target functions).
-    Get-ChildItem -Path "$projectRoot\Products\EntraMap\Checks\*.ps1" -File | ForEach-Object { . $_.FullName }
+    Get-ChildItem -Path "$projectRoot\Future\EntraMap\Checks\*.ps1" -File | ForEach-Object { . $_.FullName }
 
     function script:Register-AllEntraChecks {
         foreach ($regFunc in Get-Command -Name 'Register-Entra*Checks' -ErrorAction SilentlyContinue) {

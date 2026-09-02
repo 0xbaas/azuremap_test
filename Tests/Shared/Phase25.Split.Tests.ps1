@@ -1,22 +1,26 @@
 #==============================================================================
 # AzureMap v2 - Tests/Shared/Phase25.Split.Tests.ps1
-# Phase 25 - product split (AzureMap / EntraMap). Mocked/local only: no Azure,
-# no Graph, no authentication.
+# Phase 25 - product split (AzureMap active; EntraMap parked under
+# Future/EntraMap). Mocked/local only: no Azure, no Graph, no authentication.
 #
 # Each product composition is probed in a child powershell.exe process that
 # dot-sources exactly the module set its entrypoint loads (Shared\Core +
-# Products\<Product>Map\{Core,Capability,Checks} + Shared\Export), so
-# function-surface claims (e.g. "AzureMap has no Graph token code") hold for
-# the whole session.
+# product {Core,Capability,Checks} + Shared\Export), so function-surface
+# claims (e.g. "AzureMap has no Graph token code") hold for the whole
+# session. The EntraMap probe loads the parked tree (Future\EntraMap); the
+# AzureMap probe loads Products\AzureMap.
 #
 # Covers:
 #   (a) AzureMap load: no Entra checks, no Graph surface, ARM preflight ok
-#   (b) EntraMap load: ENTRA-01..12 + IDENTITY-001/002/004, no ARM discovery
-#       surface, Graph preflight ok without subscription discovery
-#   (c) azuremap.ps1 deprecated switches (-EntraOnly guidance, -SkipEntra note)
+#   (b) EntraMap (parked) load: ENTRA-01..12 + IDENTITY-001/002/004, no ARM
+#       discovery surface, Graph preflight ok without subscription discovery
+#   (c) azuremap.ps1 deprecated switches (-EntraOnly parked guidance,
+#       -SkipEntra note)
 #   (d) product-aware labels (banner tagline, run-mode label, HTML source)
 #   (e) IDENTITY-002 with no Azure subscription scope -> NotEvaluated, never a
 #       false clean PASS
+#   (f) repo layout: root has only azuremap.ps1 active, Products/ holds only
+#       AzureMap, EntraMap is parked under Future/EntraMap
 #==============================================================================
 
 BeforeAll {
@@ -44,17 +48,19 @@ $env:SuppressAzurePowerShellBreakingChangeWarnings = 'true'
 $probe = [ordered]@{ Product = $Product }
 
 # ---- Load exactly what the product entrypoint loads ----
+# EntraMap is parked: its product tree lives under Future\EntraMap.
+$productDir = if ($Product -eq 'Entra') { "$ProjectRoot\Future\EntraMap" } else { "$ProjectRoot\Products\AzureMap" }
 . "$ProjectRoot\Shared\Core\State.ps1"
 . "$ProjectRoot\Shared\Core\Logging.ps1"
 . "$ProjectRoot\Shared\Core\Config.ps1"
 . "$ProjectRoot\Shared\Core\Exclusions.ps1"
 $alreadyLoaded = @('State.ps1', 'Logging.ps1', 'Config.ps1', 'Exclusions.ps1')
-foreach ($coreDir in @("$ProjectRoot\Shared\Core", "$ProjectRoot\Products\${Product}Map\Core", "$ProjectRoot\Products\${Product}Map\Capability")) {
+foreach ($coreDir in @("$ProjectRoot\Shared\Core", "$productDir\Core", "$productDir\Capability")) {
     foreach ($coreFile in Get-ChildItem -Path "$coreDir\*.ps1" -File) {
         if ($coreFile.Name -notin $alreadyLoaded) { . $coreFile.FullName }
     }
 }
-foreach ($checkFile in Get-ChildItem -Path "$ProjectRoot\Products\${Product}Map\Checks\*.ps1" -File) { . $checkFile.FullName }
+foreach ($checkFile in Get-ChildItem -Path "$productDir\Checks\*.ps1" -File) { . $checkFile.FullName }
 foreach ($exportFile in Get-ChildItem -Path "$ProjectRoot\Shared\Export\*.ps1" -File) { . $exportFile.FullName }
 
 # ---- Function-surface facts ----
@@ -193,7 +199,7 @@ Describe "AzureMap composition (Azure-only product)" {
     }
 }
 
-Describe "EntraMap composition (Entra-only product)" {
+Describe "EntraMap composition (parked product, loaded from Future/EntraMap)" {
 
     It "registers all twelve Entra checks (ENTRA-01..ENTRA-12)" {
         1..12 | ForEach-Object {
@@ -257,8 +263,8 @@ Describe "Entrypoints and deprecated switches" {
         $src | Should -Not -Match 'Invoke-AzureMapCollection'
     }
 
-    It "entramap.ps1 loads only the Entra composition (no AzureMap product code / subscription discovery)" {
-        $src = (Get-Content -Path "$script:ProjectRoot\Products\EntraMap\entramap.ps1" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n"
+    It "entramap.ps1 (parked) loads only the Entra composition (no AzureMap product code / subscription discovery)" {
+        $src = (Get-Content -Path "$script:ProjectRoot\Future\EntraMap\entramap.ps1" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n"
         $src | Should -Match 'Shared\\Core'
         $src | Should -Match 'Shared\\Export'
         $src | Should -Match 'Initialize-EntraAuditState'
@@ -271,15 +277,16 @@ Describe "Entrypoints and deprecated switches" {
         $src | Should -Not -Match 'Get-EnvironmentFootprint'
     }
 
-    It "-EntraOnly prints entramap.ps1 guidance and stops before any Azure work" {
+    It "-EntraOnly prints the EntraMap-parked guidance and stops before any Azure work" {
         # Exercises the root wrapper end-to-end: it must pass -EntraOnly through
         # to the real Products\AzureMap entrypoint unchanged.
         Push-Location $script:ProbeDir
         try {
             $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$script:ProjectRoot\azuremap.ps1" -EntraOnly 2>&1 | Out-String
         } finally { Pop-Location }
-        $out | Should -Match 'entramap\.ps1'
         $out | Should -Match '-EntraOnly is no longer supported'
+        $out | Should -Match 'parked'
+        $out | Should -Match 'Future/EntraMap'
         $out | Should -Not -Match 'Running assessment'
     }
 
@@ -292,5 +299,40 @@ Describe "Entrypoints and deprecated switches" {
         $src = Get-Content -Path "$script:ProjectRoot\Shared\Export\Html.ps1" -Raw
         $src | Should -Match 'Get-RunModeLabel'
         $src | Should -Match 'Get-ProductTagline'
+    }
+}
+
+Describe "Repo layout (EntraMap parked)" {
+
+    It "repo root has only the azuremap.ps1 active wrapper (no root entramap.ps1)" {
+        Test-Path "$script:ProjectRoot\azuremap.ps1" | Should -BeTrue
+        Test-Path "$script:ProjectRoot\entramap.ps1" | Should -BeFalse
+    }
+
+    It "Products/ contains only the active AzureMap product" {
+        $dirs = @(Get-ChildItem -Path "$script:ProjectRoot\Products" -Directory)
+        $dirs.Name | Should -Be @('AzureMap')
+    }
+
+    It "EntraMap is parked under Future/EntraMap with entrypoint, wrapper and tests" {
+        Test-Path "$script:ProjectRoot\Future\EntraMap\entramap.ps1"       | Should -BeTrue
+        Test-Path "$script:ProjectRoot\Future\EntraMap\run-entramap.ps1"   | Should -BeTrue
+        Test-Path "$script:ProjectRoot\Future\EntraMap\Core\Graph.ps1"     | Should -BeTrue
+        Test-Path "$script:ProjectRoot\Future\EntraMap\Tests"              | Should -BeTrue
+        Test-Path "$script:ProjectRoot\Future\EntraMap\Docs\EntraMap.md"   | Should -BeTrue
+    }
+
+    It "the parked wrapper invokes the sibling entramap.ps1 and carries the parked header" {
+        $src = Get-Content -Path "$script:ProjectRoot\Future\EntraMap\run-entramap.ps1" -Raw
+        $src | Should -Match 'parked for a future phase'
+        $src | Should -Match 'Join-Path \$PSScriptRoot ''entramap\.ps1'''
+        $src | Should -Not -Match 'Products\\EntraMap'
+    }
+
+    It "the parked entrypoint still resolves the repo root (two levels up to Shared\)" {
+        $src = Get-Content -Path "$script:ProjectRoot\Future\EntraMap\entramap.ps1" -Raw
+        $src | Should -Match 'Shared\\Core\\State\.ps1'
+        # two-levels-up repoRoot computation unchanged by the move
+        $src | Should -Match 'Split-Path -Path \(Split-Path -Path \$scriptRoot -Parent\) -Parent'
     }
 }

@@ -2,22 +2,26 @@
 
 ## Product split
 
-Two products share one core; the repository is split into product and shared
-trees:
+One product is active (AzureMap); the second (EntraMap) is parked for a
+future phase. Both share one core:
 
 ```
-azuremap.ps1 / entramap.ps1      # root compatibility wrappers (param pass-through)
+azuremap.ps1                     # root compatibility wrapper (param pass-through)
 Products/
-  AzureMap/                      # real azuremap.ps1 entrypoint
+  AzureMap/                      # real azuremap.ps1 entrypoint (ACTIVE)
     Core/       ResourceGraph, Footprint, InventoryCache, Rbac, Preflight.Azure
     Capability/ CapabilityModel.Azure
     Checks/     ARM check modules (45 checks)
     Docs/       AzureMap.md
-  EntraMap/                      # real entramap.ps1 entrypoint
+Future/
+  EntraMap/                      # PARKED - not part of the active workflow
+    entramap.ps1        # real EntraMap entrypoint
+    run-entramap.ps1    # thin wrapper invoking the sibling entramap.ps1
     Core/       Graph, Collection, TenantWide, Footprint.Entra, Preflight.Entra
     Capability/ CapabilityModel.Entra
     Checks/     Entra + tenant-identity check modules
     Docs/       EntraMap.md
+    Tests/      EntraMap product tests (parked; not run under ./Tests)
 Shared/
   Core/         State, Logging, Config, Exclusions, Console, RunStatus,
                 CheckRegistry, Retry, Cache, Redaction, Preflight, Capability
@@ -25,7 +29,6 @@ Shared/
 ReferenceData/  privileged-roles.json, permission-escalation-map.json
 Tests/
   AzureMap/     tests exercising AzureMap product code
-  EntraMap/     tests exercising EntraMap product code
   Shared/       shared-framework and cross-product composition tests
   Integration/  offline equivalence checks
   Fixtures/     canned API/test data
@@ -35,11 +38,12 @@ Tests/
   the Azure (ARM control-plane) product. Loads `Shared/Core/` +
   `Products/AzureMap/{Core,Capability,Checks}` + `Shared/Export/`. Never loads
   Graph code and never acquires a Microsoft Graph token. Deprecated switches:
-  `-SkipEntra` (no-op; Azure-only is the only mode), `-EntraOnly` (prints
-  guidance to use `entramap.ps1` and stops).
-- `entramap.ps1` (root wrapper → `Products/EntraMap/entramap.ps1`) — EntraMap,
-  the Entra ID (Microsoft Graph) product. Loads `Shared/Core/` +
-  `Products/EntraMap/{Core,Capability,Checks}` + `Shared/Export/`. Uses an Az
+  `-SkipEntra` (no-op; Azure-only is the only mode), `-EntraOnly` (prints a
+  note that EntraMap is parked and stops).
+- `Future/EntraMap/entramap.ps1` — EntraMap, the Entra ID (Microsoft Graph)
+  product, **parked for a future phase** (not an active entrypoint; invoke it
+  directly or via the sibling `run-entramap.ps1` wrapper). Loads `Shared/Core/`
+  + `Future/EntraMap/{Core,Capability,Checks}` + `Shared/Export/`. Uses an Az
   context only as the token vehicle; performs no subscription discovery and no
   ARM scanning. Runs TenantWide checks only (`Invoke-AuditChecks -Phase
   TenantWide -Subscriptions @()`). Flow: preflight → Assessment scope block →
@@ -47,9 +51,9 @@ Tests/
   plan (with Graph permission-limited count) → collection → checks → Entra
   capability model → summary/exports.
 
-Run modes: Azure-only (AzureMap), Graph-only (EntraMap). A combined run
-loading both product cores in one session is a possible future mode, not a
-current entrypoint.
+Run modes: Azure-only (AzureMap, active), Graph-only (EntraMap, parked). A
+combined run loading both product cores in one session is a possible future
+mode, not a current entrypoint.
 
 Shared core contract (`Shared/Core/`): Logging, Console, State (base
 `Initialize-AuditState` + per-product wrappers layering product slots onto an
@@ -57,19 +61,19 @@ optional existing state), RunStatus, CheckRegistry, Retry, Cache, Config,
 Exclusions, Redaction, Capability primitives (`Shared/Shared/Core/Capability.ps1`),
 and the `Shared/Export/` modules. `ReferenceData/` stays at the repo root;
 both JSON files are currently consumed only by EntraMap collection
-(`Products/EntraMap/Checks/Collect.ps1`).
+(`Future/EntraMap/Checks/Collect.ps1`).
 
 Product cores:
 
 - `Products/AzureMap/Core/`: ResourceGraph, Footprint, InventoryCache, Rbac,
   Preflight.Azure (`Test-AzureAuthPreflight`, `Test-AzureSubscriptionScope`);
   `Products/AzureMap/Capability/`: CapabilityModel.Azure.
-- `Products/EntraMap/Core/`: Graph (`Get-GraphToken`, `Get-GraphTokenScopeInfo`,
+- `Future/EntraMap/Core/` (parked): Graph (`Get-GraphToken`, `Get-GraphTokenScopeInfo`,
   `Invoke-GraphCommand/Batch`, all GET-only), Collection
   (`Invoke-AzureMapCollection`), TenantWide (`Get-TenantWideData`),
   Footprint.Entra (`Build-EntraFootprint`, `Show-EntraFootprint`,
   `Show-EntraAssessmentScope`), Preflight.Entra (`Test-EntraAuthPreflight`);
-  `Products/EntraMap/Capability/`: CapabilityModel.Entra
+  `Future/EntraMap/Capability/`: CapabilityModel.Entra
   (`Build-EntraCapabilityModel`).
 
 Both products are discovery-first: AzureMap runs Get-EnvironmentFootprint
@@ -82,7 +86,7 @@ Check layout:
 
 - `Products/AzureMap/Checks/` — 45 ARM checks (incl. per-subscription
   IDENTITY-003/005/006/007), registered via `Register-Azure*Checks`.
-- `Products/EntraMap/Checks/` — ENTRA-01..12 plus the relocated tenant-wide
+- `Future/EntraMap/Checks/` (parked) — ENTRA-01..12 plus the relocated tenant-wide
   identity checks IDENTITY-001/002/004 (`TenantIdentity.ps1`; CheckIds and
   logic unchanged), registered as hashtable definitions returned by
   `Register-Entra*Checks`.
@@ -99,7 +103,7 @@ Important files:
 - Shared/Core/CheckRegistry.ps1
 - Shared/Shared/Core/RunStatus.ps1
 - Shared/Shared/Core/Console.ps1
-- Products/EntraMap/Core/Collection.ps1
+- Future/EntraMap/Core/Collection.ps1 (parked)
 - Shared/Export/Json.ps1
 - Shared/Export/Csv.ps1
 - Shared/Export/Html.ps1
@@ -158,8 +162,8 @@ Shared/Core/Capability.ps1 (model version, output caps, context, node/edge/insig
 constructors with dedupe + truncation, evidence readers). Each entrypoint
 runs its own builder after assessment (step 8.5, timed as the CapabilityModel
 phase): azuremap.ps1 calls Build-CapabilityModel
-(Products/AzureMap/Capability/CapabilityModel.Azure.ps1), entramap.ps1 calls
-Build-EntraCapabilityModel (Products/EntraMap/Capability/CapabilityModel.Entra.ps1). Both build
+(Products/AzureMap/Capability/CapabilityModel.Azure.ps1), the parked entramap.ps1 calls
+Build-EntraCapabilityModel (Future/EntraMap/Capability/CapabilityModel.Entra.ps1). Both build
 from already-collected data only and perform NO Azure/Graph API calls, never
 retrieve keys/secrets/SAS/tokens/content and never execute write actions
 (enforced by source-grep tests; the Entra model is additionally pinned by a

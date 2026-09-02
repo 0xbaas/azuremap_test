@@ -16,7 +16,7 @@ BeforeAll {
     . "$projectRoot\Shared\Core\CheckRegistry.ps1"
     . "$projectRoot\Products\AzureMap\Core\Rbac.ps1"
     . "$projectRoot\Shared\Core\Retry.ps1"
-    . "$projectRoot\Products\EntraMap\Core\Collection.ps1"
+    . "$projectRoot\Future\EntraMap\Core\Collection.ps1"
 
     $script:State = Initialize-AzureAuditState
     $script:State = Initialize-EntraAuditState -State $script:State

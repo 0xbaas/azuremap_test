@@ -1,13 +1,18 @@
 #==============================================================================
 # AzureMap v2 - Tests/Shared/Phase29.ReportLayout.Tests.ps1
-# Phase 29 / Report UX v2 R1 - opt-in "Pentester Dashboard" HTML layout.
+# Phase 29 / Report UX v2 R1 - "Pentester Dashboard" HTML layout.
 # Mocked/local only. No Azure, no Graph, no authentication, no data-plane.
 #
 # Pins:
-#   * Classic stays the default layout (default render is byte-unchanged:
-#     Classic markers present, Pentester markers absent).
-#   * -ReportLayout is accepted by both product entrypoints AND both root
-#     wrappers (static parameter inspection only - no execution).
+#   * Pentester is the DEFAULT layout (no -ReportLayout): default in the
+#     shared state config and in the param defaults of the active AzureMap
+#     entrypoints (root azuremap.ps1 + Products/AzureMap/azuremap.ps1).
+#   * -ReportLayout Classic selects the legacy Classic renderer
+#     (byte-unchanged: Classic markers present, Pentester markers absent).
+#   * -ReportLayout is accepted by the active AzureMap entrypoint AND the
+#     root wrapper (static parameter inspection only - no execution); the
+#     ValidateSet rejects values outside Classic/Pentester. (EntraMap is
+#     parked under Future/EntraMap and is not an active entrypoint.)
 #   * Pentester layout: section order (Findings before Coverage), narrow
 #     6-column findings index, #fd-N anchor integrity, inline evidence with
 #     the 50-row cap note, compact coverage status line, capability section,
@@ -157,16 +162,44 @@ BeforeAll {
     }
 }
 
-Describe "Classic remains the default layout" {
+Describe "Pentester is the default layout" {
 
-    It "ReportLayout defaults to Classic in the shared state config" {
+    It "ReportLayout defaults to Pentester in the shared state config" {
         $script:State = Initialize-AzureAuditState
-        $script:State.Config.ReportLayout | Should -Be 'Classic'
+        $script:State.Config.ReportLayout | Should -Be 'Pentester'
         $script:State = Initialize-EntraAuditState
-        $script:State.Config.ReportLayout | Should -Be 'Classic'
+        $script:State.Config.ReportLayout | Should -Be 'Pentester'
     }
 
-    It "default render produces Classic markers and no Pentester markers" {
+    It "ReportLayout param defaults to Pentester in the active AzureMap entrypoints (root wrapper + product)" {
+        foreach ($script in @(
+            "$projectRoot\azuremap.ps1",
+            "$projectRoot\Products\AzureMap\azuremap.ps1"
+        )) {
+            (Get-Content $script -Raw) | Should -Match '\$ReportLayout\s*=\s*''Pentester''' -Because "$script must default -ReportLayout to Pentester"
+        }
+    }
+
+    It "Show-AuditSummary with default config dispatches to the Pentester renderer" {
+        New-P29AzureState
+        $script:State.Timestamp = '20990101-000000'
+        $script:State.Config.ExportFormats = @('HTML')
+        Push-Location $TestDrive
+        try {
+            Show-AuditSummary
+            $html = Get-Content "AzureSecurityAudit-20990101-000000.html" -Raw
+            $html | Should -Match 'id="fd-0"'
+            $html | Should -Match 'Pentester Overview'
+            $html | Should -Not -Match 'id="components"'
+        } finally {
+            Pop-Location
+        }
+    }
+}
+
+Describe "Classic layout (legacy opt-in)" {
+
+    It "Classic render produces Classic markers and no Pentester markers" {
         New-P29AzureState
         $out = Join-Path $TestDrive 'p29-classic.html'
         Export-ResultsHtml -Results @($script:State.Results) -OutputPath $out | Out-Null
@@ -177,14 +210,15 @@ Describe "Classic remains the default layout" {
         $html | Should -Not -Match 'Pentester Overview'
     }
 
-    It "Show-AuditSummary with default config dispatches to the Classic renderer" {
+    It "Show-AuditSummary with ReportLayout=Classic dispatches to the Classic renderer" {
         New-P29AzureState
-        $script:State.Timestamp = '20990101-000000'
+        $script:State.Timestamp = '20990101-000002'
         $script:State.Config.ExportFormats = @('HTML')
+        $script:State.Config.ReportLayout = 'Classic'
         Push-Location $TestDrive
         try {
             Show-AuditSummary
-            $html = Get-Content "AzureSecurityAudit-20990101-000000.html" -Raw
+            $html = Get-Content "AzureSecurityAudit-20990101-000002.html" -Raw
             $html | Should -Match 'id="components"'
             $html | Should -Not -Match 'id="fd-0"'
         } finally {
@@ -393,12 +427,12 @@ Describe "Pentester layout - EntraMap product shape" {
 
 Describe "-ReportLayout parameter plumbing" {
 
-    It "ReportLayout is accepted by both product entrypoints and both root wrappers" {
+    It "ReportLayout is accepted by the active AzureMap entrypoint and the root wrapper" {
+        # EntraMap is parked under Future/EntraMap (not an active entrypoint),
+        # so only the AzureMap scripts are asserted here.
         foreach ($script in @(
             "$projectRoot\Products\AzureMap\azuremap.ps1",
-            "$projectRoot\Products\EntraMap\entramap.ps1",
-            "$projectRoot\azuremap.ps1",
-            "$projectRoot\entramap.ps1"
+            "$projectRoot\azuremap.ps1"
         )) {
             $cmd = Get-Command $script
             $cmd.Parameters.ContainsKey('ReportLayout') | Should -BeTrue -Because "$script must expose -ReportLayout"
@@ -406,12 +440,10 @@ Describe "-ReportLayout parameter plumbing" {
         }
     }
 
-    It "ReportLayout defaults to Classic and rejects values outside the ValidateSet" {
+    It "ReportLayout defaults to Pentester and rejects values outside the ValidateSet" {
         foreach ($script in @(
             "$projectRoot\Products\AzureMap\azuremap.ps1",
-            "$projectRoot\Products\EntraMap\entramap.ps1",
-            "$projectRoot\azuremap.ps1",
-            "$projectRoot\entramap.ps1"
+            "$projectRoot\azuremap.ps1"
         )) {
             $p = (Get-Command $script).Parameters['ReportLayout']
             $vs = @($p.Attributes | Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] })
@@ -420,7 +452,7 @@ Describe "-ReportLayout parameter plumbing" {
             $vs[0].ValidValues | Should -Contain 'Pentester'
             $vs[0].ValidValues | Should -Not -Contain 'Bogus'
             # default value declared in the param block
-            (Get-Content $script -Raw) | Should -Match '\$ReportLayout\s*=\s*''Classic'''
+            (Get-Content $script -Raw) | Should -Match '\$ReportLayout\s*=\s*''Pentester'''
         }
     }
 

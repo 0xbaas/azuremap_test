@@ -41,7 +41,7 @@ param(
     [switch]$RedactPublicIps,
 
     [ValidateSet('Classic', 'Pentester')]
-    [string]$ReportLayout = 'Classic'
+    [string]$ReportLayout = 'Pentester'
 )
 
 & (Join-Path $PSScriptRoot 'Products\AzureMap\azuremap.ps1') @PSBoundParameters

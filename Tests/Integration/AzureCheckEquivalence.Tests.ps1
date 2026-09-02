@@ -121,7 +121,7 @@ BeforeAll {
     foreach ($f in $checkFiles) {
         . $f.FullName
     }
-    . (Join-Path $ProjectRoot "Products\EntraMap\Checks\TenantIdentity.ps1")
+    . (Join-Path $ProjectRoot "Future\EntraMap\Checks\TenantIdentity.ps1")
 }
 
 BeforeEach {

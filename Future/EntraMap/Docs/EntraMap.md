@@ -1,9 +1,13 @@
 # EntraMap
 
-EntraMap is the **read-only** Entra ID (Microsoft Graph) security assessment tool of the AzureMap/EntraMap family.
-It scans an Entra ID tenant for misconfigurations, excessive permissions, and credential hygiene gaps, and exports findings to CSV, JSON, and HTML. For Azure subscription (ARM) audits, use [AzureMap](../../AzureMap/Docs/AzureMap.md).
+> **Parked:** EntraMap is parked for a future phase — it is not part of the
+> active AzureMap workflow. Everything below still applies when you run it
+> from this directory.
 
-EntraMap never changes your environment: every Microsoft Graph call is a `GET`, and no write, create, update, or delete operation is ever performed. See [SAFETY.md](../../SAFETY.md) for the safety contract and [SAFE-RUN.md](../../SAFE-RUN.md) for the safe-run guide.
+EntraMap is the **read-only** Entra ID (Microsoft Graph) security assessment tool of the AzureMap/EntraMap family.
+It scans an Entra ID tenant for misconfigurations, excessive permissions, and credential hygiene gaps, and exports findings to CSV, JSON, and HTML. For Azure subscription (ARM) audits, use [AzureMap](../../Products/AzureMap/Docs/AzureMap.md).
+
+EntraMap never changes your environment: every Microsoft Graph call is a `GET`, and no write, create, update, or delete operation is ever performed. See [SAFETY.md](../../../SAFETY.md) for the safety contract and [SAFE-RUN.md](../../../SAFE-RUN.md) for the safe-run guide.
 
 ## Requirements
 
@@ -24,16 +28,16 @@ From the repository root:
 
 ```powershell
 # Full tenant audit (all Entra checks).
-.\entramap.ps1 -VerboseOutput
+.\Future\EntraMap\run-entramap.ps1 -VerboseOutput
 
 # Include PIM eligible/active assignment checks (beta endpoints).
-.\entramap.ps1 -VerboseOutput -UseGraphBeta
+.\Future\EntraMap\run-entramap.ps1 -VerboseOutput -UseGraphBeta
 
 # Limit scope to specific service areas.
-.\entramap.ps1 -VerboseOutput -Services EntraRoles,EntraPIM
+.\Future\EntraMap\run-entramap.ps1 -VerboseOutput -Services EntraRoles,EntraPIM
 
 # Redact sensitive identifiers in exports/console:
-.\entramap.ps1 -VerboseOutput -RedactSensitive
+.\Future\EntraMap\run-entramap.ps1 -VerboseOutput -RedactSensitive
 ```
 
 Useful switches:
@@ -193,8 +197,8 @@ When a Graph-capable session is available, acceptance of a live run requires:
 
 ## More documentation
 
-- [AzureMap](../../AzureMap/Docs/AzureMap.md) — the Azure (ARM) product
-- [SAFE-RUN.md](../../SAFE-RUN.md) — safe-run guide and release smoke checklist
-- [SAFETY.md](../../SAFETY.md) — safety rules (what the tools may and may not do)
-- [ARCHITECTURE.md](../../ARCHITECTURE.md) — module layout and the product split
-- [CHANGELOG.md](../../CHANGELOG.md) — release history
+- [AzureMap](../../../Products/AzureMap/Docs/AzureMap.md) — the Azure (ARM) product
+- [SAFE-RUN.md](../../../SAFE-RUN.md) — safe-run guide and release smoke checklist
+- [SAFETY.md](../../../SAFETY.md) — safety rules (what the tools may and may not do)
+- [ARCHITECTURE.md](../../../ARCHITECTURE.md) — module layout and the product split
+- [CHANGELOG.md](../../../CHANGELOG.md) — release history

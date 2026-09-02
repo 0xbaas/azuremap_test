@@ -8,12 +8,13 @@
 #==============================================================================
 
 BeforeAll {
-    $projectRoot = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
+    # Parked under Future/EntraMap/Tests: repo root is three levels up.
+    $projectRoot = Split-Path -Path (Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent) -Parent
 
     . "$projectRoot\Shared\Core\State.ps1"
     . "$projectRoot\Shared\Core\Logging.ps1"
     . "$projectRoot\Shared\Core\Retry.ps1"
-    . "$projectRoot\Products\EntraMap\Core\Graph.ps1"
+    . "$projectRoot\Future\EntraMap\Core\Graph.ps1"
 
     $script:State = Initialize-EntraAuditState
     $script:State.Config.Quiet = $true

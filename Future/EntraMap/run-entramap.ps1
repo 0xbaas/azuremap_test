@@ -1,14 +1,15 @@
 <#
 .SYNOPSIS
-    Entra ID Security Audit Tool v2.0 (EntraMap) - repo-root entrypoint wrapper.
+    Entra ID Security Audit Tool v2.0 (EntraMap) - entrypoint wrapper.
 .DESCRIPTION
+    EntraMap is parked for a future phase - not part of the active AzureMap
+    workflow.
+
     Thin wrapper: forwards every parameter verbatim to the real product
-    entrypoint at Products\EntraMap\entramap.ps1 (invoked as a script, so
+    entrypoint entramap.ps1 in this same directory (invoked as a script, so
     $PSScriptRoot inside it resolves to its real location and an early
-    'return' there does not affect this wrapper's host). Kept at the repo
-    root so existing invocations (.\entramap.ps1 ...) keep working after the
-    Products/Shared layout refactor. Log and export files still land in the
-    caller's current directory, exactly as before.
+    'return' there does not affect this wrapper's host). Log and export files
+    land in the caller's current directory.
 #>
 [CmdletBinding()]
 param(
@@ -37,7 +38,7 @@ param(
     [switch]$RedactPublicIps,
 
     [ValidateSet('Classic', 'Pentester')]
-    [string]$ReportLayout = 'Classic'
+    [string]$ReportLayout = 'Pentester'
 )
 
-& (Join-Path $PSScriptRoot 'Products\EntraMap\entramap.ps1') @PSBoundParameters
+& (Join-Path $PSScriptRoot 'entramap.ps1') @PSBoundParameters

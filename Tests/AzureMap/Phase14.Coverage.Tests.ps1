@@ -29,6 +29,7 @@ BeforeAll {
     . "$projectRoot\Shared\Export\Csv.ps1"
     . "$projectRoot\Shared\Export\Json.ps1"
     . "$projectRoot\Shared\Export\Html.ps1"
+    . "$projectRoot\Shared\Export\HtmlPentester.ps1"
     . "$projectRoot\Shared\Export\Summary.ps1"
 
     function global:Get-AzContext { param([Parameter(ValueFromRemainingArguments)]$r) $null }
@@ -439,7 +440,9 @@ Describe "Show-AuditSummary - default export path includes HTML" {
             Test-Path "AzureSecurityAudit-20990101-000000.html" | Should -BeTrue
             $html = Get-Content "AzureSecurityAudit-20990101-000000.html" -Raw
             $html | Should -Match 'B1-SUM'
-            $html | Should -Match 'Executive Summary'
+            # default layout is Pentester; the legacy Classic 'Executive Summary'
+            # marker only appears with -ReportLayout Classic
+            $html | Should -Match 'Pentester Overview'
         } finally {
             Pop-Location
         }
