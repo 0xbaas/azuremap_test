@@ -7,7 +7,7 @@ AzureMap never changes your environment. See [SAFETY.md](../../SAFETY.md) for th
 
 ## What it covers
 
-- **Azure checks** across Storage, Key Vault, Network, Compute, SQL, Messaging, Data Platform, Monitoring, Identity/RBAC, and public exposure (36 checks).
+- **Azure checks** across Storage, Key Vault, Network, Compute, SQL, Messaging, Data Platform, Monitoring, Identity/RBAC, and public exposure (45 checks, including the parity additions IDENTITY-007, COMPUTE-006/007, NETWORK-009/010, MONITORING-004, and STORAGE-007).
 - **Capability insights (B2)**: read-only modeling that connects findings into higher-order risk — e.g. public exposure + privileged identity, Shared Key + key-capable RBAC, monitoring gaps on exposed resources. Shown as a top-5 CLI summary, an HTML "Capability Insights" section, and a full graph in JSON.
 - **Environment footprint** with applicability gating (checks report "Not in scope" only when the environment is proven to lack relevant resources).
 - **Data-plane checks (opt-in)**: anonymous blob container access and Key Vault secret expiry — disabled by default, enabled only with `-IncludeDataPlane`, and limited to safe metadata.
@@ -62,6 +62,8 @@ Data-plane checks are **off by default**; AzureMap then reads only the ARM contr
 - `STORAGE-004` — lists blob container **names and public-access levels** per storage account (anonymous access detection).
 - `KEYVAULT-003` — reads secret **metadata** per vault (name, enabled, created, expiry) for expiry hygiene.
 
+`STORAGE-004` reports two distinct signal levels: **CONFIRMED** public containers (data-plane enumeration verified anonymous access — CRITICAL) and, separately, accounts that merely **allow** blob public access at account level (control-plane signal — LOW; no public containers confirmed). Without `-IncludeDataPlane`, the anonymous-access evaluation is reported as not evaluated, never as clean.
+
 Even when enabled, these checks read **safe metadata only**. AzureMap never retrieves:
 
 - secret values, account keys, or key material of any kind
@@ -93,6 +95,10 @@ Each run writes (gitignored; treat as sensitive — they contain tenant/subscrip
 - `AzureSecurityAudit-<timestamp>.json` — summary, coverage, performance, capability model, findings
 - `AzureSecurityAudit-<timestamp>.html` — interactive report (coverage, findings, capability insights, per-check detail)
 - `AzureMap-<timestamp>.log` — run log
+
+### Finding counts and caveats
+
+Every finding carries a `CountType` telling you what its count enumerates: `UniqueResources` (distinct resources), `Containers`, `RoleAssignments` (assignments, **not** unique users), `RiskSignals` (one resource may contribute several), `Observations`, or `NotEvaluatedItems` (items that could **not** be evaluated — never counted as affected). The HTML reports and the CLI top-findings summary render the matching label ("5 resources", "3 assignments", "12 risk signals") instead of a generic "affected". The HTML reports also attach small static caveats to the relevant finding groups (e.g. "Public network access does not mean anonymous data access.", "NotEvaluated is not Pass.") — presentation only; they never change severity or status.
 
 ## Expected runtime
 

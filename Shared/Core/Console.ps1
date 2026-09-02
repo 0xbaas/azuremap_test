@@ -35,6 +35,7 @@ $script:CheckDisplayNames = @{
     'IDENTITY-004'       = 'Expired credentials'
     'IDENTITY-005'       = 'Custom RBAC roles'
     'IDENTITY-006'       = 'Identity-resource mapping'
+    'IDENTITY-007'       = 'RBAC decomposition'
     # Entra
     'ENTRA-01'           = 'Privileged role assignments'
     'ENTRA-02'           = 'PIM eligible assignments'
@@ -59,6 +60,7 @@ $script:CheckDisplayNames = @{
     'STORAGE-004'        = 'Anonymous blob access'
     'STORAGE-005'        = 'Data exfiltration vectors'
     'STORAGE-006'        = 'Storage key & SAS exposure'
+    'STORAGE-007'        = 'Storage double encryption'
     # Networking
     'NETWORK-001'        = 'Sensitive inbound exposure'
     'NETWORK-002'        = 'Private endpoint DNS linkage'
@@ -68,6 +70,8 @@ $script:CheckDisplayNames = @{
     'NETWORK-006'        = 'Firewall threat intelligence'
     'NETWORK-007'        = 'Application Gateway WAF'
     'NETWORK-008'        = 'Outbound exfiltration paths'
+    'NETWORK-009'        = 'App Gateway listener hygiene'
+    'NETWORK-010'        = 'PaaS private connectivity'
     # Data platforms
     'SQL-001'            = 'SQL database security'
     'SQL-002'            = 'SQL advanced security'
@@ -79,6 +83,8 @@ $script:CheckDisplayNames = @{
     'COMPUTE-003'        = 'Container registry security'
     'COMPUTE-004'        = 'VM monitoring agents'
     'COMPUTE-005'        = 'App Service security'
+    'COMPUTE-006'        = 'App Service FTP state'
+    'COMPUTE-007'        = 'VM backup coverage'
     # Messaging & integration
     'MESSAGING-001'      = 'Event Hub public access'
     'MESSAGING-002'      = 'Service Bus security'
@@ -88,6 +94,7 @@ $script:CheckDisplayNames = @{
     'MONITORING-001'     = 'Diagnostic settings coverage'
     'MONITORING-002'     = 'Resource locks'
     'MONITORING-003'     = 'Automation Run As accounts'
+    'MONITORING-004'     = 'Extended diagnostics coverage'
     'AZURE-GOV-001'      = 'Defender for Cloud coverage'
     # Exposure
     'AZURE-EXPOSURE-001' = 'Public exposure inventory'
@@ -282,6 +289,108 @@ function Get-StatusDisplayInfo {
         default         { $label = "$Status";           $color = 'Gray' }
     }
     return [PSCustomObject]@{ Label = $label; Color = $color }
+}
+
+#endregion
+
+#region ---- Count semantics + finding caveats (display layer only) ----
+# Pure presentation helpers: they map already-produced finding metadata
+# (CountType, CheckId) to human labels/caveats. No severity/status logic here.
+
+function Get-CountTypeLabel {
+    <#
+    .SYNOPSIS
+        Maps a finding's CountType to the short noun used wherever an affected
+        count is displayed ("5 resources" instead of a generic "5 affected").
+    .DESCRIPTION
+        CountType semantics (finding schema, New-AzureMapFinding):
+        UniqueResources = distinct resources; Containers / RoleAssignments =
+        sub-resource collections; RiskSignals = individual risk observations
+        (one resource may contribute several); Observations = informational
+        notes; NotEvaluatedItems = items that could NOT be evaluated (never
+        affected). Unknown/empty falls back to the generic 'affected'.
+    #>
+    [CmdletBinding()]
+    param([AllowEmptyString()][string]$CountType = '')
+
+    switch ($CountType) {
+        'UniqueResources'   { 'resources' }
+        'Containers'        { 'containers' }
+        'RoleAssignments'   { 'assignments' }
+        'RiskSignals'       { 'risk signals' }
+        'Observations'      { 'observations' }
+        'NotEvaluatedItems' { 'not-evaluated items' }
+        default             { 'affected' }
+    }
+}
+
+# Static display-layer caveat map: CheckId -> caveat rule(s). A rule with a
+# 'Pattern' applies only to finding messages matching that regex (one check
+# can emit several finding categories); a rule without a Pattern applies to
+# every finding group of the check. Presentation only - no evaluation logic.
+$script:FindingCaveatMap = @{
+    'STORAGE-002' = @(
+        @{ Text = 'Public network access does not mean anonymous data access.' },
+        @{ Text = 'Account-level public blob access does not prove public containers.' }
+    )
+    'STORAGE-004' = @(
+        @{ Pattern = 'account level'; Text = 'Account-level public blob access does not prove public containers.' }
+    )
+    'KEYVAULT-002' = @(
+        @{ Pattern = 'public (network )?access'; Text = 'Public network access does not mean anonymous data access.' },
+        @{ Pattern = 'private endpoint';         Text = 'Private IP/private endpoint does not prove full private-only access.' }
+    )
+    'NETWORK-001' = @(
+        @{ Text = 'NSG rule does not prove reachability unless attached to a public path.' }
+    )
+    'NETWORK-002' = @(
+        @{ Text = 'Private IP/private endpoint does not prove full private-only access.' }
+    )
+    'NETWORK-008' = @(
+        @{ Pattern = 'NSG'; Text = 'NSG rule does not prove reachability unless attached to a public path.' }
+    )
+    'NETWORK-010' = @(
+        @{ Pattern = 'public network access'; Text = 'Public network access does not mean anonymous data access.' },
+        @{ Text = 'Private IP/private endpoint does not prove full private-only access.' }
+    )
+    'IDENTITY-003' = @(
+        @{ Text = 'RBAC assignment counts are not unique users.' }
+    )
+    'IDENTITY-007' = @(
+        @{ Text = 'RBAC assignment counts are not unique users.' }
+    )
+}
+
+# Rendered in the Not Evaluated / Partial / Errors section of both HTML
+# layouts: a not-evaluated result is not a pass.
+$script:NotEvaluatedCaveat = 'NotEvaluated is not Pass.'
+
+function Get-FindingCaveats {
+    <#
+    .SYNOPSIS
+        Returns the display caveats for a finding group (CheckId + finding
+        message), or an empty array when the check has none.
+    #>
+    [CmdletBinding()]
+    param(
+        [AllowEmptyString()][string]$CheckId = '',
+        [AllowEmptyString()][string]$Finding = ''
+    )
+
+    $entries = $null
+    if ($CheckId -and $script:FindingCaveatMap.ContainsKey($CheckId)) {
+        $entries = $script:FindingCaveatMap[$CheckId]
+    }
+    if (-not $entries) { return @() }
+
+    $result = New-Object System.Collections.Generic.List[string]
+    foreach ($e in $entries) {
+        if ($e.ContainsKey('Pattern') -and $e.Pattern) {
+            if ($Finding -notmatch $e.Pattern) { continue }
+        }
+        if (-not $result.Contains($e.Text)) { $result.Add($e.Text) }
+    }
+    return $result.ToArray()
 }
 
 #endregion
@@ -657,13 +766,18 @@ function Show-AuditConsole {
             ForEach-Object {
                 $first = $_.Group[0]
                 $sum   = 0
-                foreach ($g in $_.Group) { $sum += [int]$g.Count }
+                $countType = ''
+                foreach ($g in $_.Group) {
+                    $sum += [int]$g.Count
+                    if (-not $countType -and "$($g.CountType)") { $countType = "$($g.CountType)" }
+                }
                 [PSCustomObject]@{
-                    Severity = $first.Severity
-                    Service  = $first.Service
-                    Finding  = $first.Finding
-                    Affected = $sum
-                    Groups   = $_.Count
+                    Severity  = $first.Severity
+                    Service   = $first.Service
+                    Finding   = $first.Finding
+                    Affected  = $sum
+                    CountType = $countType
+                    Groups    = $_.Count
                 }
             }
         $grouped = @($grouped)
@@ -675,7 +789,7 @@ function Show-AuditConsole {
             $color  = switch ("$($f.Severity)".ToUpper()) { 'CRITICAL' {'CritRed'} 'HIGH' {'DarkYellow'} 'MEDIUM' {'Yellow'} 'LOW' {'LightGreen'} default {'Cyan'} }
             $suffix = if ([int]$f.Groups -gt 1) { " across $([int]$f.Groups) subscriptions" } else { "" }
             Write-UiHost -Text ("  {0,-9} " -f "$($f.Severity)".ToUpper()) -Color $color -NoNewline
-            Write-ConsoleLine ("{0} - {1} ({2} affected{3})" -f $f.Service, $f.Finding, (Format-UiNumber $f.Affected), $suffix)
+            Write-ConsoleLine ("{0} - {1} ({2} {3}{4})" -f $f.Service, $f.Finding, (Format-UiNumber $f.Affected), (Get-CountTypeLabel -CountType $f.CountType), $suffix)
         }
         if ($grouped.Count -gt $top.Count) {
             Write-ConsoleLine ("  ... and {0} more finding group(s). See exported report." -f ($grouped.Count - $top.Count)) 'DarkGray'

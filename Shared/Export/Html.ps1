@@ -57,12 +57,14 @@ function Group-HtmlFindings {
         $count  = 0
         $anyPartial  = $false
         $allComplete = $true
+        $countType   = ''
         $evidence = New-Object System.Collections.Generic.List[object]
         $subs = New-Object System.Collections.Generic.List[string]
         foreach ($r in $g.Group) {
             if ($null -ne $r.Count) { $count += [int]$r.Count }
             if ($r.PartialEvaluation) { $anyPartial = $true }
             if (-not $r.CompleteEvaluation) { $allComplete = $false }
+            if (-not $countType -and "$($r.CountType)") { $countType = "$($r.CountType)" }
             foreach ($e in @($r.Evidence)) { if ($null -ne $e) { $evidence.Add($e) } }
             $sn = "$($r.SubscriptionName)"
             if ($sn -and $sn -ne 'Multiple' -and -not $subs.Contains($sn)) { $subs.Add($sn) }
@@ -73,6 +75,7 @@ function Group-HtmlFindings {
             Service                  = $first.Service
             Finding                  = $first.Finding
             Count                    = $count
+            CountType                = $countType
             Status                   = $first.Status
             Confidence               = $first.Confidence
             PartialEvaluation        = $anyPartial
@@ -127,6 +130,35 @@ function Get-HtmlSeverityPill {
     $s = "$Severity".ToUpper()
     if (-not $s) { return '<span class="pill sv-none">-</span>' }
     return "<span class=""pill sv-$($s.ToLower())"">$s</span>"
+}
+
+function Get-HtmlCaveatNote {
+    <#
+    .SYNOPSIS
+        Renders one or more caveat strings as a small muted note. Pure
+        presentation - the caveats come from the static display-layer map in
+        Shared/Core/Console.ps1 (Get-FindingCaveats / $script:NotEvaluatedCaveat).
+    #>
+    [CmdletBinding()]
+    param([string[]]$Caveats)
+
+    if (-not $Caveats -or $Caveats.Count -eq 0) { return '' }
+    $text = ($Caveats | ForEach-Object { Escape-HtmlContent -Text $_ }) -join ' '
+    return "<p class=""muted caveat"">Caveat: $text</p>"
+}
+
+function Get-HtmlFindingCaveats {
+    <#
+    .SYNOPSIS
+        Renders the display caveats for a finding group (CheckId + finding
+        message), or an empty string when the check has none.
+    #>
+    [CmdletBinding()]
+    param(
+        [AllowEmptyString()][string]$CheckId = '',
+        [AllowEmptyString()][string]$Finding = ''
+    )
+    return (Get-HtmlCaveatNote -Caveats @(Get-FindingCaveats -CheckId $CheckId -Finding $Finding))
 }
 
 function ConvertTo-HtmlCompactValue {
@@ -446,6 +478,7 @@ td a.comp-link:hover { text-decoration:underline; }
 .sv-medium { background:var(--med); color:#fff; } .sv-low { background:var(--low); color:var(--low-ink, #fff); }
 .sv-info { background:var(--info); color:#fff; } .sv-none { color:var(--muted); }
 .muted { color:var(--muted); }
+.caveat { font-size:.85em; margin:.2em 0 .6em; }
 .trunc-note { color:var(--partial); font-size:.85rem; font-style:italic; }
 details { background:var(--panel); border:1px solid var(--line); border-radius:10px; margin:10px 0; }
 details > summary { cursor:pointer; padding:11px 16px; font-weight:600; list-style:none; }
@@ -678,7 +711,7 @@ footer .brand { color:var(--brand); font-weight:600; }
             foreach ($f in $sortedFindings) {
                 $covState = if ($f.PartialEvaluation) { 'Partial' } elseif ($f.CompleteEvaluation) { 'Complete' } else { '' }
                 $fSum = if ($f.SummaryText) { $f.SummaryText } elseif ($f.CoverageSummary) { $f.CoverageSummary } else { '' }
-                $countCell = "<a href=""#comp-$gi"" class=""comp-link"">View $($f.Count) affected</a>"
+                $countCell = "<a href=""#comp-$gi"" class=""comp-link"">View $($f.Count) $(Get-CountTypeLabel -CountType "$($f.CountType)")</a>"
                 $gi++
                 if ($f.SubscriptionSpan -gt 1) { $countCell += "<div class=""muted"">across $($f.SubscriptionSpan) subscriptions</div>" }
                 [void]$sb.Append("<tr data-sev=""$("$($f.Severity)".ToUpper())"">")
@@ -712,9 +745,10 @@ footer .brand { color:var(--brand); font-weight:600; }
                 if ($f.PartialEvaluation)        { $badges += '<span class="badge on">partial coverage - may be incomplete</span>' }
                 $scopeNote = ''
                 if ($f.SubscriptionSpan -gt 1) { $scopeNote = " &middot; $($f.SubscriptionSpan) subscriptions" }
-                [void]$sb.Append("<details id=""comp-$ci""><summary>$(Get-HtmlSeverityPill -Severity $f.Severity) $(Escape-HtmlContent -Text $f.Finding) <span class=""muted"">($(Escape-HtmlContent -Text $f.CheckId) &middot; $($f.Count) affected$scopeNote)</span>$badges</summary>")
+                [void]$sb.Append("<details id=""comp-$ci""><summary>$(Get-HtmlSeverityPill -Severity $f.Severity) $(Escape-HtmlContent -Text $f.Finding) <span class=""muted"">($(Escape-HtmlContent -Text $f.CheckId) &middot; $($f.Count) $(Get-CountTypeLabel -CountType "$($f.CountType)")$scopeNote)</span>$badges</summary>")
                 $ci++
                 [void]$sb.Append('<div class="body">')
+                [void]$sb.Append($(Get-HtmlFindingCaveats -CheckId "$($f.CheckId)" -Finding "$($f.Finding)"))
                 [void]$sb.Append($(ConvertTo-HtmlEvidenceTable -Evidence $f.Evidence))
                 if ($f.Remediation) { [void]$sb.Append("<p><strong>Recommendation:</strong> $(ConvertTo-HtmlCompactValue -Value $f.Remediation -MaxLength 400)</p>") }
                 [void]$sb.Append('<p class="muted">Full per-subscription detail in the CSV/JSON exports.</p>')
@@ -797,7 +831,7 @@ footer .brand { color:var(--brand); font-weight:600; }
                     [void]$sb.Append("<p class=""muted"">$(Get-HtmlStatusPill -Status $f.Status) $(Escape-HtmlContent -Text $f.Finding) (no affected resources)</p>")
                     continue
                 }
-                [void]$sb.Append("<h3>$(Get-HtmlSeverityPill -Severity $f.Severity) $(Escape-HtmlContent -Text $f.Finding) ($($f.Count) affected)</h3>")
+                [void]$sb.Append("<h3>$(Get-HtmlSeverityPill -Severity $f.Severity) $(Escape-HtmlContent -Text $f.Finding) ($($f.Count) $(Get-CountTypeLabel -CountType "$($f.CountType)"))</h3>")
                 [void]$sb.Append($(ConvertTo-HtmlEvidenceTable -Evidence $f.Evidence))
             }
             if ($remediations.Count -gt 0) {
@@ -820,7 +854,7 @@ footer .brand { color:var(--brand); font-weight:600; }
                     [void]$sb.Append("<p class=""muted"">$(Get-HtmlStatusPill -Status $f.Status) $(Get-HtmlSeverityPill -Severity $f.Severity) [$(Escape-HtmlContent -Text $f.CheckId)] $(Escape-HtmlContent -Text $f.Finding) (no affected resources)</p>")
                     continue
                 }
-                [void]$sb.Append("<h3>$(Get-HtmlSeverityPill -Severity $f.Severity) $(Get-HtmlStatusPill -Status $f.Status) [$(Escape-HtmlContent -Text $f.CheckId)] $(Escape-HtmlContent -Text $f.Finding) ($($f.Count) affected)</h3>")
+                [void]$sb.Append("<h3>$(Get-HtmlSeverityPill -Severity $f.Severity) $(Get-HtmlStatusPill -Status $f.Status) [$(Escape-HtmlContent -Text $f.CheckId)] $(Escape-HtmlContent -Text $f.Finding) ($($f.Count) $(Get-CountTypeLabel -CountType "$($f.CountType)"))</h3>")
                 [void]$sb.Append($(ConvertTo-HtmlEvidenceTable -Evidence $f.Evidence))
             }
             [void]$sb.Append('</div></details>')
@@ -830,6 +864,7 @@ footer .brand { color:var(--brand); font-weight:600; }
         # ---- 6. Not Evaluated / Partial / Errors ----
         $attention = @($exec | Where-Object { "$($_.Status)" -in @('NotEvaluated','Partial','Error','Skipped','Warning') })
         [void]$sb.Append('<section id="attention"><h2>Not Evaluated / Partial / Errors</h2>')
+        [void]$sb.Append($(Get-HtmlCaveatNote -Caveats @($script:NotEvaluatedCaveat)))
         if ($attention.Count -eq 0) {
             [void]$sb.Append('<p class="muted">All checks completed with proven coverage.</p>')
         } else {

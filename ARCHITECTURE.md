@@ -11,7 +11,7 @@ Products/
   AzureMap/                      # real azuremap.ps1 entrypoint
     Core/       ResourceGraph, Footprint, InventoryCache, Rbac, Preflight.Azure
     Capability/ CapabilityModel.Azure
-    Checks/     ARM check modules (36 checks)
+    Checks/     ARM check modules (45 checks)
     Docs/       AzureMap.md
   EntraMap/                      # real entramap.ps1 entrypoint
     Core/       Graph, Collection, TenantWide, Footprint.Entra, Preflight.Entra
@@ -80,8 +80,8 @@ and any permission-limited surface up front.
 
 Check layout:
 
-- `Products/AzureMap/Checks/` — 36 ARM checks (incl. per-subscription
-  IDENTITY-003/005/006), registered via `Register-Azure*Checks`.
+- `Products/AzureMap/Checks/` — 45 ARM checks (incl. per-subscription
+  IDENTITY-003/005/006/007), registered via `Register-Azure*Checks`.
 - `Products/EntraMap/Checks/` — ENTRA-01..12 plus the relocated tenant-wide
   identity checks IDENTITY-001/002/004 (`TenantIdentity.ps1`; CheckIds and
   logic unchanged), registered as hashtable definitions returned by
@@ -251,6 +251,13 @@ PASS semantics:
 
 Finding/reporting fields (optional, emitted by coverage-aware checks):
 
+\- CountType: what Count enumerates (UniqueResources / Containers /
+  RoleAssignments / RiskSignals / Observations / NotEvaluatedItems).
+  NotEvaluatedItems are never affected. Display layers map it to a short
+  label via Get-CountTypeLabel (Shared/Core/Console.ps1; fallback 'affected')
+  and attach static per-finding caveats from $script:FindingCaveatMap
+  (presentation only - no severity/status logic).
+
 \- DiscoveredResourceCount, EvaluatedResourceCount, SkippedResourceCount,
   FailedCollectionCount (use `$null` for "unknown", never fake 0).
 
@@ -273,7 +280,7 @@ Exports and console must preserve explicit Status and Coverage;
 Reference implementation:
 
 \- Products/AzureMap/Checks/Storage.ps1 (New-StorageCoverage / New-StorageCoverageParams
-  helpers; all five STORAGE checks emit explicit status + coverage).
+  helpers; all seven STORAGE checks emit explicit status + coverage).
 
 
 Status model (UX phase addition):

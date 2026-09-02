@@ -2,6 +2,37 @@
 
 All notable AzureMap phases, newest first. Tags mark each accepted phase.
 
+## Unreleased — AzureMap reliability + parity pass
+
+- P0 finding-evidence fixes:
+  - Key Vault evidence split: KEYVAULT-002 emits distinct findings per signal
+    (public network access, firewall default Allow, public + no firewall,
+    purge protection, private endpoints, audit logging) instead of one mixed
+    bucket; every finding carries its own evidence and remediation.
+  - Finding schema gains `CountType` (UniqueResources / Containers /
+    RoleAssignments / RiskSignals / Observations / NotEvaluatedItems) so a
+    count says what it enumerates; NotEvaluatedItems are never counted as
+    affected.
+  - STORAGE-003/004/005/006 correctness fixes: STORAGE-004 distinguishes
+    data-plane CONFIRMED public containers from the account-level
+    control-plane signal; STORAGE-005 separates critical combinations, risk
+    signals, and observations; NotEvaluated is reported explicitly instead of
+    as clean.
+- P1 new parity checks (7): IDENTITY-007 (RBAC privileged assignment
+  decomposition), COMPUTE-006 (App Service FTP state), COMPUTE-007 (VM backup
+  coverage), NETWORK-009 (App Gateway listener/TLS hygiene), NETWORK-010
+  (sensitive PaaS private connectivity), MONITORING-004 (extended resource
+  diagnostics), STORAGE-007 (infrastructure/double encryption). AzureMap now
+  registers 45 checks.
+- P2 report readability (display layer only — no severity/status changes):
+  - Affected counts render with a CountType-derived label ("5 resources",
+    "3 assignments", "12 risk signals", …; fallback "affected") in both HTML
+    layouts and the CLI top-findings summary.
+  - Static per-finding caveats in both HTML layouts (e.g. "Public network
+    access does not mean anonymous data access.", "RBAC assignment counts are
+    not unique users.", "NotEvaluated is not Pass.") from one shared map in
+    `Shared/Core/Console.ps1`.
+
 ## Unreleased — AzureMap/EntraMap product split
 
 - The combined `azuremap.ps1` is split into two products on one shared core:
