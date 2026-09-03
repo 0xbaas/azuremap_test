@@ -34,7 +34,17 @@ BeforeAll {
     function global:Get-AzWebApp      { param([Parameter(ValueFromRemainingArguments)]$r) if ($global:FxWebAppsThrow) { throw "403 AuthorizationFailed" }; $global:FxWebApps }
     function global:Get-AzVM          { param([Parameter(ValueFromRemainingArguments)]$r) if ($global:FxVMsThrow) { throw "403 AuthorizationFailed" }; $global:FxVMs }
     function global:Get-AzFunctionApp { param([Parameter(ValueFromRemainingArguments)]$r) if ($global:FxFuncsThrow) { throw "403 AuthorizationFailed" }; $global:FxFuncs }
-    function global:Get-AzRoleAssignment { param([Parameter(ValueFromRemainingArguments)]$r) if ($global:FxRbacThrow) { throw "403 AuthorizationFailed" }; $global:FxRbac }
+    # The RBAC helper reads ARM REST (Invoke-AzRestMethod), never Get-AzRoleAssignment:
+    # the cmdlet's Graph principal enrichment fails under ARM-only auth. This stub
+    # serves the roleAssignments/roleDefinitions endpoints from REST-shaped fixtures.
+    function global:Invoke-AzRestMethod {
+        param([string]$Path, [string]$Method, [Parameter(ValueFromRemainingArguments)]$r)
+        if ($global:FxRbacThrow) { throw "403 AuthorizationFailed" }
+        if ("$Path" -match 'roleDefinitions') {
+            return [PSCustomObject]@{ StatusCode = 200; Content = (@{ value = @($global:FxRbacDefs) } | ConvertTo-Json -Depth 6) }
+        }
+        [PSCustomObject]@{ StatusCode = 200; Content = (@{ value = @($global:FxRbac) } | ConvertTo-Json -Depth 6) }
+    }
 
     function global:Get-AzStorageAccount {
         param([switch]$IncludeAccountSASPolicy, [Parameter(ValueFromRemainingArguments)]$r)
@@ -93,6 +103,7 @@ Describe "Phase15 - B1 smoke cleanup" {
         $global:FxVMs     = @(); $global:FxVMsThrow     = $false
         $global:FxFuncs   = @(); $global:FxFuncsThrow   = $false
         $global:FxRbac    = @(); $global:FxRbacThrow    = $false
+        $global:FxRbacDefs = @()
         $global:FxAccounts = @(); $global:FxAccountsThrow = $false
         $global:FxNet = $null
         $global:FxVaults = @(); $global:FxVaultsThrow = $false
@@ -139,7 +150,22 @@ Describe "Phase15 - B1 smoke cleanup" {
 
         It "risky assignment -> FAIL even when another collection also failed" {
             $global:FxWebApps = @(New-TestApp -Name 'app1' -PrincipalId '11111111-1111-1111-1111-111111111111')
-            $global:FxRbac = @([PSCustomObject]@{ ObjectId = '11111111-1111-1111-1111-111111111111'; RoleDefinitionName = 'Owner'; Scope = '/subscriptions/S1' })
+            # ARM REST-shaped RBAC fixtures (the helper resolves role names via the
+            # roleDefinitions endpoint; Owner's built-in GUID is used here).
+            $ownerGuid = '8e3af657-a8ff-443c-a75c-2fe8c4bcb635'
+            $global:FxRbacDefs = @([PSCustomObject]@{
+                id = "/subscriptions/S1/providers/Microsoft.Authorization/roleDefinitions/$ownerGuid"
+                properties = [PSCustomObject]@{ roleName = 'Owner' }
+            })
+            $global:FxRbac = @([PSCustomObject]@{
+                id = "/subscriptions/S1/providers/Microsoft.Authorization/roleAssignments/ra-1"
+                properties = [PSCustomObject]@{
+                    scope            = '/subscriptions/S1'
+                    roleDefinitionId = "/subscriptions/S1/providers/Microsoft.Authorization/roleDefinitions/$ownerGuid"
+                    principalId      = '11111111-1111-1111-1111-111111111111'
+                    principalType    = 'User'
+                }
+            })
             $global:FxVMsThrow = $true
             Test-IdentityResourceMapping -Subscriptions @($global:FxSub) -Exclusions @{}
             $all = (script:Get-Res -CheckId 'IDENTITY-006')

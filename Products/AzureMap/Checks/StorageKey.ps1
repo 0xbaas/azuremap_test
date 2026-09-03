@@ -73,12 +73,16 @@ function Test-StorageKeyExposure {
         $subsEvaluated.Add($sub.Name)
         $totalAccounts += @($inv.Items).Count
 
-        # -IncludeAccountSASPolicy is not supported by all Az.Storage versions.
+        # -IncludeAccountSASPolicy is not supported by all Az.Storage versions;
+        # 9.x removed the parameter and returns a SasPolicy property by default.
         # Detect once (cached) and degrade SAS evidence to partial, not failure.
-        if (-not (Test-StorageSasPolicySupported)) {
+        # Only subscriptions that actually HAVE storage accounts without any
+        # SasPolicy evidence are marked: a module support gap on a subscription
+        # with zero storage accounts must never count as a storage risk.
+        if (@($inv.Items).Count -gt 0 -and -not (Test-StorageSasPolicySupported -SampleAccounts $inv.Items)) {
             $notEval.Add([PSCustomObject]@{
                 SubscriptionName = $sub.Name
-                Reason = "Account SAS expiration policy not evaluated (installed Az.Storage does not support -IncludeAccountSASPolicy)"
+                Reason = "Account SAS expiration policy not evaluated (installed Az.Storage supports neither -IncludeAccountSASPolicy nor the SasPolicy property)"
             })
         }
 
@@ -175,7 +179,7 @@ function Test-StorageKeyExposure {
     $covParams = New-StorageCoverageParams -Coverage $cov -Discovered $totalAccounts `
         -Evaluated $totalAccounts -SkippedResources $skippedResources `
         -SkippedSubscriptions $subsSkipped -EvaluatedSubscriptions $subsEvaluated `
-        -ApiSources @('ARM Get-AzStorageAccount -IncludeAccountSASPolicy', 'ARM Get-AzRoleAssignment (subscription scope, cached; role names only)') `
+        -ApiSources @('ARM Get-AzStorageAccount -IncludeAccountSASPolicy', 'ARM REST roleAssignments (subscription scope, cached; role names only)') `
         -FindingType 'Exposure'
 
     # RBAC/SAS evaluation gaps are NOT affected resources: keep them in their own

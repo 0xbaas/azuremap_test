@@ -39,11 +39,6 @@ BeforeAll {
     }
     function global:Get-AzContext { $null }
 
-    function global:Get-AzRoleAssignment {
-        param([Parameter(ValueFromRemainingArguments)]$r)
-        if ($global:FxRbacThrow) { throw "403 AuthorizationFailed reading role assignments" }
-        $global:FxRbac
-    }
     function global:Get-AzWebApp {
         param([string]$ResourceGroupName, [string]$Name, [Parameter(ValueFromRemainingArguments)]$r)
         if ($global:FxWebAppsThrow) { throw "403 AuthorizationFailed listing web apps" }
@@ -125,8 +120,51 @@ BeforeAll {
         if ($global:FxArgThrow) { throw "ARG unavailable" }
         $global:FxArgRows
     }
+    # The RBAC helper reads ARM REST (Invoke-AzRestMethod), never Get-AzRoleAssignment
+    # (its Graph principal enrichment fails under ARM-only auth). The RBAC endpoints
+    # are served from the old-shape $global:FxRbac fixtures, translated to REST
+    # responses with a deterministic role-definition GUID per role name; every
+    # other path keeps the ARG bulk-read behavior.
+    function global:ConvertTo-RestRoleGuid {
+        param([string]$Name)
+        $md5 = [System.Security.Cryptography.MD5]::Create()
+        try { return ([guid]$md5.ComputeHash([System.Text.Encoding]::UTF8.GetBytes("$Name"))).Guid }
+        finally { $md5.Dispose() }
+    }
     function global:Invoke-AzRestMethod {
-        param([Parameter(ValueFromRemainingArguments)]$r)
+        param([string]$Path, [Parameter(ValueFromRemainingArguments)]$r)
+        if ("$Path" -match '/providers/Microsoft\.Authorization/roleAssignments') {
+            if ($global:FxRbacThrow) { throw "403 AuthorizationFailed reading role assignments" }
+            $i = 0
+            $value = @($global:FxRbac | ForEach-Object {
+                $i++
+                [PSCustomObject]@{
+                    id = "/subscriptions/S1/providers/Microsoft.Authorization/roleAssignments/ra-$i"
+                    properties = [PSCustomObject]@{
+                        scope            = $_.Scope
+                        roleDefinitionId = "/subscriptions/S1/providers/Microsoft.Authorization/roleDefinitions/$(ConvertTo-RestRoleGuid $_.RoleDefinitionName)"
+                        principalId      = $_.ObjectId
+                        principalType    = $_.ObjectType
+                    }
+                }
+            })
+            return [PSCustomObject]@{ StatusCode = 200; Content = (@{ value = $value } | ConvertTo-Json -Depth 8) }
+        }
+        if ("$Path" -match '/providers/Microsoft\.Authorization/roleDefinitions') {
+            if ($global:FxRbacThrow) { throw "403 AuthorizationFailed reading role definitions" }
+            $seen = @{}
+            $value = @($global:FxRbac | ForEach-Object {
+                $n = "$($_.RoleDefinitionName)"
+                if ($n -and -not $seen.ContainsKey($n)) {
+                    $seen[$n] = $true
+                    [PSCustomObject]@{
+                        id = "/subscriptions/S1/providers/Microsoft.Authorization/roleDefinitions/$(ConvertTo-RestRoleGuid $n)"
+                        properties = [PSCustomObject]@{ roleName = $n }
+                    }
+                }
+            })
+            return [PSCustomObject]@{ StatusCode = 200; Content = (@{ value = $value } | ConvertTo-Json -Depth 8) }
+        }
         if ($global:FxArgThrow) { throw "ARG unavailable" }
         $payload = @{ data = @($global:FxArgRows) } | ConvertTo-Json -Depth 6 -Compress
         [PSCustomObject]@{ StatusCode = 200; Content = $payload }

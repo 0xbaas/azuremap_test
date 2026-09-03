@@ -336,6 +336,16 @@ function Test-CustomRoles {
         }
     }
 
+    # Same contract as IDENTITY-003/007: when the subscription RBAC read failed,
+    # assignment counts for custom roles are unproven - surface NotEvaluated for
+    # those subscriptions so the check can never end as a misleading clean PASS.
+    foreach ($sub in $Subscriptions) {
+        if ((-not [string]::IsNullOrWhiteSpace("$($sub.Id)")) -and
+            $script:State.Cache.RBACUnavailable.ContainsKey($sub.Id) -and $script:State.Cache.RBACUnavailable[$sub.Id]) {
+            $rolesUnavailable.Add([PSCustomObject]@{ SubscriptionName = $sub.Name })
+        }
+    }
+
     if ($rolesUnavailable.Count -gt 0) {
         Write-Finding -Severity "INFO" `
                       -Message "Custom roles could not be evaluated for one or more subscriptions (role definitions unreadable under current authentication)" `
@@ -537,7 +547,7 @@ function Test-IdentityResourceMapping {
         SummaryText              = $summary
         Confidence               = if ($status -eq 'NOTEVALUATED') { 'Low' } elseif ($partial) { 'Medium' } else { 'High' }
         ManualValidationRequired = ($status -in @('PARTIAL','NOTEVALUATED'))
-        ApiSources               = @('ARM Get-AzWebApp', 'ARM Get-AzVM', 'ARM Get-AzFunctionApp', 'ARM Get-AzRoleAssignment (role names only)')
+        ApiSources               = @('ARM Get-AzWebApp', 'ARM Get-AzVM', 'ARM Get-AzFunctionApp', 'ARM REST roleAssignments (role names only)')
         FindingType              = 'ExcessivePermissions'
     }
 
@@ -695,7 +705,7 @@ function Test-RBACDecomposition {
     }
     $covParams = New-AzureCheckCoverageParams -Coverage $cov -Discovered $assignmentCount -Evaluated $assignmentCount `
         -SkippedResources 0 -SkippedSubscriptions $subsSkipped -EvaluatedSubscriptions $subsEvaluated `
-        -ApiSources @('ARM Get-AzRoleAssignment (subscription scope, cached)') -FindingType 'ExcessivePermissions'
+        -ApiSources @('ARM REST roleAssignments (subscription scope, cached)') -FindingType 'ExcessivePermissions'
 
     if ($notEval.Count -gt 0) {
         Write-Finding -Severity "HIGH" -Status "NOTEVALUATED" -CheckId "IDENTITY-007" `

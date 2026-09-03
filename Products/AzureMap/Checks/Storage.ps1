@@ -34,17 +34,26 @@
 function Test-StorageSasPolicySupported {
     <#
     .SYNOPSIS
-        Detects once per session whether the installed Az.Storage supports
-        -IncludeAccountSASPolicy on Get-AzStorageAccount (older versions do not).
-        Result is cached in script scope; tests may preset $script:StorageSasPolicySupported.
+        Detects once per session whether account SAS expiration policy evidence is
+        available: either the installed Az.Storage supports -IncludeAccountSASPolicy
+        on Get-AzStorageAccount (older versions do not), or the returned storage
+        account objects carry a SasPolicy property by default (Az.Storage 9.x
+        removed the parameter and exposes SasPolicy on the plain list).
     .DESCRIPTION
         StrictMode-safe: the cache variable is read via Get-Variable so an unset
         variable never throws (azuremap.ps1 runs under Set-StrictMode). If
         detection itself fails, fails safe to $false (callers then collect
         without the parameter and mark SAS-policy evidence unavailable).
+        A parameter-only NEGATIVE is not cached: a later call that passes
+        -SampleAccounts may still prove support via the SasPolicy property.
+    .PARAMETER SampleAccounts
+        Optional storage account objects (e.g. the current subscription's
+        inventory) inspected for a SasPolicy property when the parameter check
+        fails. Any account exposing the property (regardless of its value)
+        proves support.
     #>
     [CmdletBinding()]
-    param()
+    param([object[]]$SampleAccounts)
     $cached = Get-Variable -Name 'StorageSasPolicySupported' -Scope Script -ValueOnly -ErrorAction SilentlyContinue
     if ($null -ne $cached) {
         return [bool]$cached
@@ -57,7 +66,12 @@ function Test-StorageSasPolicySupported {
     catch {
         $supported = $false
     }
-    $script:StorageSasPolicySupported = $supported
+    if (-not $supported -and $SampleAccounts) {
+        foreach ($sa in $SampleAccounts) {
+            if ($sa -and ($sa.PSObject.Properties.Name -contains 'SasPolicy')) { $supported = $true; break }
+        }
+    }
+    if ($supported -or $SampleAccounts) { $script:StorageSasPolicySupported = $supported }
     return $supported
 }
 
@@ -792,8 +806,10 @@ function Test-StorageExfiltrationVectors {
         # SAS policy evidence unavailable on this Az.Storage version: the account set
         # was still collected and all other vectors are evaluated, but the SAS-expiry
         # vector is unproven -> record once per subscription so status degrades to
-        # PARTIAL instead of pretending full coverage.
-        if (-not (Test-StorageSasPolicySupported)) {
+        # PARTIAL instead of pretending full coverage. Only subscriptions that
+        # actually HAVE storage accounts without any SasPolicy evidence are marked:
+        # a module support gap on an empty subscription is not a storage risk.
+        if (@($inv.Items).Count -gt 0 -and -not (Test-StorageSasPolicySupported -SampleAccounts $inv.Items)) {
             $notEval.Add([PSCustomObject]@{
                 SubscriptionName = $sub.Name
                 Reason = "Account SAS expiration policy not evaluated (installed Az.Storage does not support -IncludeAccountSASPolicy)"
@@ -812,7 +828,10 @@ function Test-StorageExfiltrationVectors {
                 Get-AzStorageAccountNetworkRuleSet -ResourceGroupName $sa.ResourceGroupName -AccountName $sa.StorageAccountName -ErrorAction SilentlyContinue
             } -CommandName "Get-StorageNetworkRules" -SkipContextCheck
 
+            # Az.Storage 9.x exposes the policy as SasPolicy (no parameter needed);
+            # older versions only with -IncludeAccountSASPolicy as AccountSasPolicy.
             $sasPolicy = Get-StorageAccountProperty -Account $sa -Name 'AccountSasPolicy'
+            if (-not $sasPolicy) { $sasPolicy = Get-StorageAccountProperty -Account $sa -Name 'SasPolicy' }
             $sasExpiryDays = 0
             $hasLongSASPolicy = $false
             if ($sasPolicy -and ($sasPolicy.PSObject.Properties.Name -contains 'SasExpirationPeriod') -and $sasPolicy.SasExpirationPeriod) {

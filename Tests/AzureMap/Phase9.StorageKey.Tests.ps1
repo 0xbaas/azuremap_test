@@ -20,8 +20,52 @@ BeforeAll {
     $script:Subs = @([PSCustomObject]@{ Id='s1'; Name='sub1' })
 
     function Get-AzStorageAccount     { param([Parameter(ValueFromRemainingArguments)]$r) }
-    function Get-AzRoleAssignment     { param($Scope, [Parameter(ValueFromRemainingArguments)]$r) }
     function Get-AzStorageAccountKey  { param([Parameter(ValueFromRemainingArguments)]$r) }
+
+    # The RBAC helper now reads ARM REST (Invoke-AzRestMethod), never
+    # Get-AzRoleAssignment (its Graph principal enrichment fails under ARM-only
+    # auth). This stub serves both RBAC endpoints from $script:Fx* fixtures.
+    function Invoke-AzRestMethod {
+        param([string]$Path, [string]$Method, [Parameter(ValueFromRemainingArguments)]$r)
+        if ($script:FxRbacThrow) { throw "403" }
+        if ("$Path" -match 'roleDefinitions') {
+            return [PSCustomObject]@{ StatusCode = 200; Content = (@{ value = @($script:FxRoleDefs) } | ConvertTo-Json -Depth 6) }
+        }
+        if ($null -ne $script:FxRbacAssignCalls) { [void]$script:FxRbacAssignCalls.Add("$Path") }
+        [PSCustomObject]@{ StatusCode = 200; Content = (@{ value = @($script:FxRoleAssignments) } | ConvertTo-Json -Depth 6) }
+    }
+
+    # Converts old-shape assignment fixtures (@{ RoleDefinitionName; Scope; ... })
+    # into ARM REST-shaped assignment/definition responses, deriving a
+    # deterministic role-definition GUID per role name (MD5 of the name).
+    function Set-FxRbac {
+        param([array]$Assignments)
+        $guidFor = @{}
+        $defs = @()
+        $ras  = @()
+        $i = 0
+        foreach ($a in @($Assignments)) {
+            $i++
+            $n = "$($a.RoleDefinitionName)"
+            if (-not $guidFor.ContainsKey($n)) {
+                $md5 = [System.Security.Cryptography.MD5]::Create()
+                try { $guidFor[$n] = ([guid]$md5.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($n))).Guid }
+                finally { $md5.Dispose() }
+                $defs += [PSCustomObject]@{ id = "/subscriptions/s1/providers/Microsoft.Authorization/roleDefinitions/$($guidFor[$n])"; properties = [PSCustomObject]@{ roleName = $n } }
+            }
+            $ras += [PSCustomObject]@{
+                id = "/subscriptions/s1/providers/Microsoft.Authorization/roleAssignments/ra-$i"
+                properties = [PSCustomObject]@{
+                    scope            = $a.Scope
+                    roleDefinitionId = "/subscriptions/s1/providers/Microsoft.Authorization/roleDefinitions/$($guidFor[$n])"
+                    principalId      = $a.ObjectId
+                    principalType    = $a.ObjectType
+                }
+            }
+        }
+        $script:FxRoleAssignments = $ras
+        $script:FxRoleDefs        = $defs
+    }
 
     function New-SA {
         param([string]$Name, [object]$Ask='__none__', [int]$SasDays=0)
@@ -42,8 +86,10 @@ Describe "STORAGE-006 Storage key/SAS exposure" {
         # Tests emulate an Az.Storage version WITH -IncludeAccountSASPolicy support
         # (unsupported-version behavior is covered in Phase15).
         $script:StorageSasPolicySupported = $true
+        $script:FxRbacThrow = $false
+        $script:FxRbacAssignCalls = $null
+        Set-FxRbac @()
         Mock Set-SubscriptionContext { $true }
-        Mock Get-AzRoleAssignment { @() }
         Mock Get-AzStorageAccountKey { @() }
     }
 
@@ -69,10 +115,9 @@ Describe "STORAGE-006 Storage key/SAS exposure" {
 
     It "FAILs when a key-capable role is assigned" {
         Mock Get-AzStorageAccount { @( (New-SA -Name 'sa1' -Ask $false) ) }
-        # The RBAC data now comes from the cached subscription-scope read, so the
-        # assignment carries its Scope (the old per-account -Scope call did not
-        # require it). Effective at the account: scope == account id.
-        Mock Get-AzRoleAssignment { @( [PSCustomObject]@{ RoleDefinitionName='Owner'; DisplayName='Someone'; Scope='/subscriptions/s1/rg/sa1' } ) }
+        # The RBAC data comes from the cached subscription-scope ARM REST read, so
+        # the assignment carries its Scope. Effective at the account: scope == account id.
+        Set-FxRbac @( [PSCustomObject]@{ RoleDefinitionName='Owner'; Scope='/subscriptions/s1/rg/sa1' } )
         Test-StorageKeyExposure -Subscriptions $script:Subs
         $script:State.Results[-1].Status | Should -Be 'FAIL'
         (($script:State.Results[-1].Evidence.Risk) -join ' ') | Should -BeLike '*retrieve/manage storage account keys*'
@@ -80,7 +125,7 @@ Describe "STORAGE-006 Storage key/SAS exposure" {
 
     It "FAILs when a key-capable role is inherited from the subscription scope" {
         Mock Get-AzStorageAccount { @( (New-SA -Name 'sa1' -Ask $false) ) }
-        Mock Get-AzRoleAssignment { @( [PSCustomObject]@{ RoleDefinitionName='Contributor'; DisplayName='SubContributor'; Scope='/subscriptions/s1' } ) }
+        Set-FxRbac @( [PSCustomObject]@{ RoleDefinitionName='Contributor'; Scope='/subscriptions/s1' } )
         Test-StorageKeyExposure -Subscriptions $script:Subs
         $script:State.Results[-1].Status | Should -Be 'FAIL'
         (($script:State.Results[-1].Evidence.Risk) -join ' ') | Should -BeLike '*retrieve/manage storage account keys*'
@@ -88,21 +133,20 @@ Describe "STORAGE-006 Storage key/SAS exposure" {
 
     It "does NOT flag key-capable roles assigned on an unrelated scope" {
         Mock Get-AzStorageAccount { @( (New-SA -Name 'sa1' -Ask $false) ) }
-        Mock Get-AzRoleAssignment { @( [PSCustomObject]@{ RoleDefinitionName='Owner'; DisplayName='Elsewhere'; Scope='/subscriptions/s1/rg/other-sa' } ) }
+        Set-FxRbac @( [PSCustomObject]@{ RoleDefinitionName='Owner'; Scope='/subscriptions/s1/rg/other-sa' } )
         Test-StorageKeyExposure -Subscriptions $script:Subs
         $script:State.Results[-1].Status | Should -Be 'PASS'
     }
 
-    It "makes ONE cached subscription-scope RBAC read regardless of account count (no per-account Get-AzRoleAssignment)" {
+    It "makes ONE cached subscription-scope RBAC read regardless of account count (no per-account RBAC fetch)" {
         Mock Get-AzStorageAccount { @( (New-SA -Name 'sa1' -Ask $false), (New-SA -Name 'sa2' -Ask $false), (New-SA -Name 'sa3' -Ask $false) ) }
-        $script:rbacScopes = New-Object System.Collections.Generic.List[string]
-        Mock Get-AzRoleAssignment { param($Scope) [void]$script:rbacScopes.Add("$Scope"); @() }
+        $script:FxRbacAssignCalls = New-Object System.Collections.Generic.List[string]
         Test-StorageKeyExposure -Subscriptions $script:Subs
         # Regression pin for the StorageKey.ps1 perf+coverage fix: the old code
-        # made one raw Get-AzRoleAssignment -Scope <account> call PER account
-        # (documented 40-78s/call stalls under Azure-only auth).
-        $script:rbacScopes.Count | Should -Be 1
-        $script:rbacScopes[0] | Should -Be '/subscriptions/s1'
+        # made one raw uncached RBAC read PER account (documented 40-78s/call
+        # stalls under Azure-only auth).
+        $script:FxRbacAssignCalls.Count | Should -Be 1
+        $script:FxRbacAssignCalls[0] | Should -BeLike '/subscriptions/s1/providers/Microsoft.Authorization/roleAssignments*'
     }
 
     It "PASSes when shared key disabled and no key-capable roles" {
@@ -154,7 +198,7 @@ Describe "STORAGE-006 Storage key/SAS exposure" {
 
     It "is PARTIAL when key-capable RBAC cannot be read" {
         Mock Get-AzStorageAccount { @( (New-SA -Name 'sa1' -Ask $false) ) }
-        Mock Get-AzRoleAssignment { throw "403" }
+        $script:FxRbacThrow = $true
         Test-StorageKeyExposure -Subscriptions $script:Subs
         $r = $script:State.Results[-1]
         $r.Status | Should -Be 'PARTIAL'
@@ -178,7 +222,7 @@ Describe "STORAGE-006 Storage key/SAS exposure" {
 
     It "affected risk signals stay separate from RBAC NotEvaluated items" {
         Mock Get-AzStorageAccount { @( (New-SA -Name 'sa1' -Ask $true) ) }
-        Mock Get-AzRoleAssignment { throw "403" }
+        $script:FxRbacThrow = $true
         Test-StorageKeyExposure -Subscriptions $script:Subs
         $main = $script:State.Results[-1]
         $main.Status | Should -Be 'FAIL'

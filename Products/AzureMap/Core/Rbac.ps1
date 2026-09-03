@@ -46,19 +46,77 @@ function Get-SubscriptionRBACAssignments {
     }
 
     try {
-        # RBAC ASSIGNMENTS come from ARM (Microsoft.Authorization/roleAssignments).
-        # Get-AzRoleAssignment additionally enriches each assignment with the principal's
-        # DisplayName/SignInName via Microsoft Graph. Under Azure-only (-SkipEntra) that
-        # enrichment fails with "MicrosoftGraphEndpointResourceId" auth errors. Using
-        # -ErrorAction SilentlyContinue (NOT Stop) keeps that enrichment failure
-        # NON-terminating, so the ARM assignment data is still returned and the error is
-        # not promoted/re-logged per subscription. -Critical is removed so there is no
-        # auth retry loop. This is the fix for the repeated Graph auth spam.
-        $assignments = Invoke-AzureCommand -Command {
-            Get-AzRoleAssignment -Scope "/subscriptions/$SubscriptionId" -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
-        } -CommandName "Get-RoleAssignments-Scoped" -SkipContextCheck
+        # RBAC ASSIGNMENTS + ROLE DEFINITIONS come straight from ARM REST
+        # (Microsoft.Authorization), never from Get-AzRoleAssignment: that cmdlet
+        # enriches every assignment with the principal's DisplayName via Microsoft
+        # Graph, and under an ARM-only session (tenant Conditional Access blocking
+        # Graph) the enrichment makes the WHOLE call fail and return zero rows -
+        # a false clean PASS. Invoke-AzRestMethod needs only ARM, so this path
+        # works without Graph and without Connect-AzAccount.
+        $rawAssignments = @()
+        $nextPath = "/subscriptions/$SubscriptionId/providers/Microsoft.Authorization/roleAssignments?api-version=2022-04-01"
+        while ($nextPath) {
+            $page = Invoke-AzureCommand -Command {
+                Invoke-AzRestMethod -Path $nextPath -Method GET -ErrorAction Stop
+            } -CommandName "Get-RoleAssignments-Rest" -SkipContextCheck
+            $body = $null
+            if ($page -and $page.Content) { $body = ($page.Content | ConvertFrom-Json) }
+            if ($body -and $body.value) { $rawAssignments += @($body.value) }
+            $nextPath = $null
+            $next = "$($body.nextLink)"
+            if ($next) {
+                # nextLink is an absolute URL; Invoke-AzRestMethod wants a relative path.
+                if ($next -match '^https?://[^/]+(/.*)$') { $nextPath = $Matches[1] } else { $nextPath = $next }
+            }
+        }
 
-        $assignments = @($assignments)
+        # Role NAME mapping: assignments carry only the role definition resource id,
+        # so resolve GUID (last segment) -> roleName via the definitions endpoint.
+        # Cached per subscription; a definition that is not listed (e.g. MG-scoped)
+        # falls back to the GUID string so nothing crashes downstream.
+        if (-not $script:State.Cache.ContainsKey('RBACRoleDefinitions')) {
+            $script:State.Cache.RBACRoleDefinitions = @{}
+        }
+        if (-not $script:State.Cache.RBACRoleDefinitions.ContainsKey($SubscriptionId)) {
+            $roleMap = @{}
+            $nextPath = "/subscriptions/$SubscriptionId/providers/Microsoft.Authorization/roleDefinitions?api-version=2022-04-01"
+            while ($nextPath) {
+                $page = Invoke-AzureCommand -Command {
+                    Invoke-AzRestMethod -Path $nextPath -Method GET -ErrorAction Stop
+                } -CommandName "Get-RoleDefinitions-Rest" -SkipContextCheck
+                $body = $null
+                if ($page -and $page.Content) { $body = ($page.Content | ConvertFrom-Json) }
+                foreach ($def in @($body.value)) {
+                    $defGuid = ("$($def.id)" -split '/')[-1]
+                    if ($defGuid) { $roleMap[$defGuid] = "$($def.properties.roleName)" }
+                }
+                $nextPath = $null
+                $next = "$($body.nextLink)"
+                if ($next) {
+                    if ($next -match '^https?://[^/]+(/.*)$') { $nextPath = $Matches[1] } else { $nextPath = $next }
+                }
+            }
+            $script:State.Cache.RBACRoleDefinitions[$SubscriptionId] = $roleMap
+        }
+        $roleNames = $script:State.Cache.RBACRoleDefinitions[$SubscriptionId]
+
+        # Project to the shape every consumer already uses. DisplayName stays
+        # $null (no Graph); consumers render "Unknown" for null display names.
+        $assignments = @($rawAssignments | ForEach-Object {
+            $roleGuid = ("$($_.properties.roleDefinitionId)" -split '/')[-1]
+            $roleName = $roleGuid
+            if ($roleGuid -and $roleNames.ContainsKey($roleGuid)) { $roleName = $roleNames[$roleGuid] }
+            [PSCustomObject]@{
+                Scope              = "$($_.properties.scope)"
+                RoleDefinitionName = $roleName
+                RoleDefinitionId   = "$($_.properties.roleDefinitionId)"
+                ObjectType         = "$($_.properties.principalType)"
+                ObjectId           = "$($_.properties.principalId)"
+                DisplayName        = $null
+                RoleAssignmentId   = "$($_.id)"
+            }
+        })
+
         $script:State.Cache.RBACAssignments[$SubscriptionId] = $assignments
         $script:State.Cache.RBACUnavailable[$SubscriptionId] = $false
 
@@ -66,10 +124,11 @@ function Get-SubscriptionRBACAssignments {
         return $assignments
     }
     catch {
-        # A THROWN (terminating) error means the ARM RBAC read itself failed - typically a
-        # Graph/Authentication error surfaced under Azure-only. Mark the subscription's RBAC
-        # as unavailable so callers emit ONE clean NotEvaluated (never a misleading PASS),
-        # and never call Connect-AzAccount. A single WARN line per subscription, no spam.
+        # A THROWN (terminating) error means the ARM RBAC REST read itself failed
+        # (denied roleAssignments/roleDefinitions read, or an auth error under the
+        # current session). Mark the subscription's RBAC as unavailable so callers
+        # emit ONE clean NotEvaluated (never a misleading PASS), and never call
+        # Connect-AzAccount. A single WARN line per subscription, no spam.
         Write-AuditLog -Message "RBAC could not be evaluated for subscription ${SubscriptionName} (Azure RBAC read unavailable under current auth); marked NotEvaluated." -Level WARN
         $script:State.Cache.RBACAssignments[$SubscriptionId] = @()
         $script:State.Cache.RBACUnavailable[$SubscriptionId] = $true

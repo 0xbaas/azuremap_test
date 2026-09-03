@@ -24,7 +24,7 @@ All Azure data collection uses `Get-Az*` metadata cmdlets wrapped in
 `Invoke-AzureCommand`. Representative set (counts approximate):
 
 `Get-AzContext`, `Get-AzSubscription`, `Get-AzResource`, `Get-AzResourceGroup`,
-`Get-AzResourceLock`, `Get-AzRoleAssignment`, `Get-AzRoleDefinition`,
+`Get-AzResourceLock`, `Get-AzRoleDefinition`,
 `Get-AzStorageAccount`, `Get-AzStorageAccountNetworkRuleSet`, `Get-AzKeyVault`,
 `Get-AzSqlServer*`, `Get-AzVM`, `Get-AzVMExtension`, `Get-AzNetworkSecurityGroup`,
 `Get-AzVirtualNetwork(Peering)`, `Get-AzPublicIpAddress`, `Get-AzPrivateEndpoint`,
@@ -46,6 +46,9 @@ printed, or exported. → **SAFE.**
   query verb; it returns resource metadata and mutates nothing. → **SAFE.**
 - `Invoke-AzRestMethod -Method GET …/Microsoft.DocumentDb/databaseAccounts/…`
   (`Checks/Azure/DataPlatform.ps1`) — control-plane metadata GET. → **SAFE.**
+- `Invoke-AzRestMethod -Method GET …/Microsoft.Authorization/roleAssignments|roleDefinitions`
+  (`Core/Rbac.ps1`) — subscription-scope RBAC reads straight from ARM (no Graph
+  principal enrichment; works under ARM-only auth). → **SAFE.**
 
 ### Microsoft Graph — SAFE read-only
 `Invoke-GraphCommand` forces `GET` (non-GET is blocked unless explicitly opted in,

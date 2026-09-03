@@ -88,16 +88,20 @@ Describe "RBAC helper avoids Microsoft Graph and flags NotEvaluated" {
     }
 
     It "does not acquire a Graph token while reading RBAC assignments" {
-        function global:Get-AzRoleAssignment { param([Parameter(ValueFromRemainingArguments)]$r) @() }
+        # The helper reads ARM REST only (Invoke-AzRestMethod) - no Graph anywhere.
+        function global:Invoke-AzRestMethod {
+            param([string]$Path, [string]$Method, [Parameter(ValueFromRemainingArguments)]$r)
+            [PSCustomObject]@{ StatusCode = 200; Content = '{ "value": [] }' }
+        }
         $null = Get-SubscriptionRBACAssignments -SubscriptionId 'S1' -SubscriptionName 'n1'
         $script:GraphWasCalled | Should -BeFalse
         $script:State.Cache.RBACUnavailable['S1'] | Should -BeFalse
     }
 
-    It "flags the subscription NotEvaluated (empty, unavailable) on a Graph auth error, without calling Connect-AzAccount" {
+    It "flags the subscription NotEvaluated (empty, unavailable) when the ARM RBAC read fails, without calling Connect-AzAccount" {
         function global:Connect-AzAccount { param([Parameter(ValueFromRemainingArguments)]$r) throw "Connect-AzAccount must not be called" }
-        function global:Get-AzRoleAssignment {
-            param([Parameter(ValueFromRemainingArguments)]$r)
+        function global:Invoke-AzRestMethod {
+            param([string]$Path, [string]$Method, [Parameter(ValueFromRemainingArguments)]$r)
             throw "Authentication failed against resource MicrosoftGraphEndpointResourceId"
         }
         $res = Get-SubscriptionRBACAssignments -SubscriptionId 'S2' -SubscriptionName 'n2'
