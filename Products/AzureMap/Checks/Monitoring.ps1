@@ -457,7 +457,7 @@ function Test-ExtendedResourceDiagnostics {
     }
     if ($notEval.Count -gt 0 -and $missing.Count -gt 0) {
         Write-Finding -Severity "MEDIUM" -Status "NOTEVALUATED" -CheckId "MONITORING-004" `
-                      -Message "Extended diagnostic coverage could not be fully evaluated (resource or diagnostic reads failed); not reported as clean" `
+                      -Message "Extended diagnostic coverage could not be fully evaluated (resource or diagnostic reads failed)." `
                       -Count $notEval.Count -CountType "NotEvaluatedItems" -Data $notEval -Service "Diagnostics" `
                       -Remediation "Ensure microsoft.insights/diagnosticSettings/read plus per-service read permissions and re-run." `
                       -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple"

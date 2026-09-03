@@ -56,7 +56,13 @@ BeforeAll {
         $global:FxAccounts
     }
     function global:Get-AzKeyVault {
-        param([Parameter(ValueFromRemainingArguments)]$r)
+        param([string]$VaultName, [string]$ResourceGroupName, [Parameter(ValueFromRemainingArguments)]$r)
+        # Enriched flow: per-vault GET returns the matching vault object.
+        if ($VaultName) {
+            $m = @($global:FxKVs | Where-Object { $_.VaultName -eq $VaultName })
+            if ($m.Count -gt 0) { return $m[0] }
+            throw "ResourceNotFound: vault $VaultName not found"
+        }
         if ($global:FxKvThrow) { throw "403 AuthorizationFailed listing vaults" }
         $global:FxKVs
     }

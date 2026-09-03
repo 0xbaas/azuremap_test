@@ -189,7 +189,7 @@ function Test-StorageKeyExposure {
         Write-Finding -CheckId "STORAGE-006" -Service "Storage" -Category "Azure" `
             -Severity "HIGH" -Status "NOTEVALUATED" -Count $notEval.Count -CountType "NotEvaluatedItems" -Data $notEval `
             -SubscriptionId "Multiple" -SubscriptionName "Multiple" `
-            -Message "Storage key/SAS exposure could not be fully evaluated (collection or RBAC read failed); not reported as clean" `
+            -Message "Storage key/SAS exposure could not be fully evaluated (collection or RBAC read failed)." `
             -Remediation "Ensure Microsoft.Storage/storageAccounts/read and Microsoft.Authorization/roleAssignments/read on the subscriptions and re-run."
     }
 

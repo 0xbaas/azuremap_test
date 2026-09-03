@@ -115,13 +115,12 @@ BeforeAll {
     # Source the shared per-run inventory cache used by converted checks
     . "$ProjectRoot\Products\AzureMap\Core\InventoryCache.ps1"
 
-    # Source all v2 check files (plus the relocated tenant-identity checks so
-    # the loadable-function sweep still covers them)
+    # Source all v2 check files (the relocated tenant-identity checks live in
+    # the parked EntraMap tree and are covered by Future/EntraMap/Tests)
     $checkFiles = Get-ChildItem (Join-Path $ProjectRoot "Products\AzureMap\Checks\*.ps1")
     foreach ($f in $checkFiles) {
         . $f.FullName
     }
-    . (Join-Path $ProjectRoot "Future\EntraMap\Checks\TenantIdentity.ps1")
 }
 
 BeforeEach {
@@ -222,7 +221,13 @@ Describe "Test-NetworkExfiltrationPaths" {
 # ---------------------------------------------------------------------------
 Describe "Test-KeyVaultRBAC" {
     BeforeAll {
-        function Get-AzKeyVault { return $script:KeyVaults }
+        # Enriched flow: per-vault GET (-VaultName) returns the matching full
+        # vault object; the bare list call returns the list-view objects.
+        function Get-AzKeyVault {
+            param([string]$VaultName, [string]$ResourceGroupName)
+            if ($VaultName) { return @($script:KeyVaults | Where-Object { $_.VaultName -eq $VaultName })[0] }
+            return $script:KeyVaults
+        }
     }
 
     It "Should flag exactly 1 vault with RBAC disabled" {
@@ -236,7 +241,11 @@ Describe "Test-KeyVaultRBAC" {
 
 Describe "Test-KeyVaultNetworkSecurity" {
     BeforeAll {
-        function Get-AzKeyVault { return $script:KeyVaults }
+        function Get-AzKeyVault {
+            param([string]$VaultName, [string]$ResourceGroupName)
+            if ($VaultName) { return @($script:KeyVaults | Where-Object { $_.VaultName -eq $VaultName })[0] }
+            return $script:KeyVaults
+        }
         function Get-AzPrivateEndpoint { return @() }
     }
 
@@ -343,11 +352,11 @@ Describe "Test-SQLAdvancedSecurity" {
 # ---------------------------------------------------------------------------
 #  CROSS-CUTTING: Verify all check functions exist after loading modules
 # ---------------------------------------------------------------------------
-Describe "All 38 check functions are loadable (35 Azure + 3 relocated tenant-identity)" {
-    It "All 38 Azure check functions should be defined" {
+Describe "All 35 Azure check functions are loadable" {
+    It "All 35 Azure check functions should be defined" {
         $expectedFunctions = @(
-            "Test-LongLivedCredentials", "Test-DormantServicePrincipals", "Test-ExcessiveRBAC",
-            "Test-ExpiredCredentials", "Test-CustomRoles", "Test-IdentityResourceMapping",
+            "Test-ExcessiveRBAC",
+            "Test-CustomRoles", "Test-IdentityResourceMapping",
             "Test-StorageSharedKeyAccess", "Test-StoragePublicAccess", "Test-StorageAdvancedSecurity",
             "Test-StorageAnonymousBlobAccess", "Test-StorageExfiltrationVectors",
             "Test-NSGPermissiveRules", "Test-PrivateEndpointsDNS", "Test-PublicIPInventory",
@@ -368,7 +377,7 @@ Describe "All 38 check functions are loadable (35 Azure + 3 relocated tenant-ide
                 $missing += $fn
             }
         }
-        $missing | Should -BeNullOrEmpty -Because "all 38 check functions should be loaded; missing: $($missing -join ', ')"
+        $missing | Should -BeNullOrEmpty -Because "all 35 check functions should be loaded; missing: $($missing -join ', ')"
     }
 }
 

@@ -635,7 +635,7 @@ function Test-StorageAnonymousBlobAccess {
     # account's own context - NO account keys, NO SAS, NO blob content listing.
     if (-not $script:State.Config.IncludeDataPlane) {
         Write-Finding -Severity "INFO" -Status "NOTEVALUATED" -CheckId "STORAGE-004" `
-                      -Message "Anonymous blob access not evaluated: data-plane container enumeration requires -IncludeDataPlane (not reported as clean)" `
+                      -Message "Anonymous blob access not evaluated: data-plane container enumeration requires -IncludeDataPlane." `
                       -Count 0 -Data $null -Service "Storage" `
                       -Remediation "Re-run with -IncludeDataPlane to enable metadata-only container public-access evaluation (Entra/OAuth data-plane auth only; never account keys or blob content)." `
                       -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" `
@@ -763,7 +763,7 @@ function Test-StorageAnonymousBlobAccess {
     }
     if ($notEval.Count -gt 0 -and $findings.Count -gt 0) {
         Write-Finding -Severity "CRITICAL" -Status "NOTEVALUATED" -CheckId "STORAGE-004" `
-                      -Message "Anonymous blob access could not be fully evaluated (container enumeration or collection failed); not reported as clean" `
+                      -Message "Anonymous blob access could not be fully evaluated (container enumeration or collection failed)." `
                       -Count $notEval.Count -CountType "NotEvaluatedItems" -Data $notEval -Service "Storage" `
                       -Remediation "Grant the audit identity Reader + Storage Blob Data Reader (or Storage Account Contributor for control-plane container listing) and re-run." `
                       -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple"
@@ -934,7 +934,7 @@ function Test-StorageExfiltrationVectors {
     }
     if ($notEval.Count -gt 0 -and $riskyTotal -gt 0) {
         Write-Finding -Severity "CRITICAL" -Status "NOTEVALUATED" -CheckId "STORAGE-005" `
-                      -Message "Data exfiltration vectors could not be evaluated for one or more subscriptions (collection failed); not reported as clean" `
+                      -Message "Data exfiltration vectors could not be evaluated for one or more subscriptions (collection failed)." `
                       -Count $notEval.Count -CountType "NotEvaluatedItems" -Data $notEval -Service "Exfiltration" `
                       -Remediation "Ensure Microsoft.Storage/storageAccounts/read and re-run." -Exclusions $Exclusions `
                       -SubscriptionId "Multiple" -SubscriptionName "Multiple"
@@ -1044,7 +1044,7 @@ function Test-StorageDoubleEncryption {
     }
     if ($notEval.Count -gt 0 -and $notEnabled.Count -gt 0) {
         Write-Finding -Severity "INFO" -Status "NOTEVALUATED" -CheckId "STORAGE-007" `
-                      -Message "Infrastructure encryption could not be fully evaluated (property absent or collection failed); not reported as clean" `
+                      -Message "Infrastructure encryption could not be fully evaluated (property absent or collection failed)." `
                       -Count $notEval.Count -CountType "NotEvaluatedItems" -Data $notEval -Service "Storage" `
                       -Remediation "Re-run with a current Az.Storage version so Encryption.RequireInfrastructureEncryption is returned." `
                       -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple"

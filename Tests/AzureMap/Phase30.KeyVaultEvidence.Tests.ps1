@@ -22,7 +22,16 @@ BeforeAll {
     function global:Set-AzContext { param([Parameter(ValueFromRemainingArguments)]$r) }
     function global:Get-AzContext { $null }
     function global:Get-AzKeyVault {
-        param([Parameter(ValueFromRemainingArguments)]$r)
+        param([string]$VaultName, [string]$ResourceGroupName, [Parameter(ValueFromRemainingArguments)]$r)
+        # Enriched flow: a per-vault GET (-VaultName) returns the matching
+        # full vault object (or throws when that vault's enrichment fails);
+        # the bare list call returns the list-view objects.
+        if ($VaultName) {
+            if ($global:FxVaultGetDeny -contains $VaultName) { throw "403 AuthorizationFailed reading vault $VaultName" }
+            $match = @($global:FxVaults | Where-Object { $_.VaultName -eq $VaultName })
+            if ($match.Count -gt 0) { return $match[0] }
+            throw "ResourceNotFound: vault $VaultName not found"
+        }
         if ($global:FxVaultsThrow) { throw "403 AuthorizationFailed listing vaults" }
         $global:FxVaults
     }
@@ -78,6 +87,7 @@ Describe "Key Vault evidence split (KEYVAULT-001/002)" {
         $script:State.Config.Quiet = $true
         $global:FxVaults      = @()
         $global:FxVaultsThrow = $false
+        $global:FxVaultGetDeny = @()
         $global:FxPEs         = @()
         $global:FxDiag        = @()
         $global:FxDiagThrow   = $false
@@ -187,12 +197,16 @@ Describe "Key Vault evidence split (KEYVAULT-001/002)" {
             [int]$m[0].Count | Should -Be 1
             "$($m[0].Evidence[0].VaultName)" | Should -Be 'kv1'
         }
-        It "EnableRbacAuthorization absent (null) -> still flagged (never silently clean)" {
+        It "EnableRbacAuthorization absent -> NOTEVALUATED, never the legacy FAIL" {
             $kv = New-KV @{}
             $kv.PSObject.Properties.Remove('EnableRbacAuthorization')
             $global:FxVaults = @( $kv )
             Test-KeyVaultRBAC -Subscriptions @($global:FxSub) -Exclusions @{}
-            @(Get-Fin '*legacy access policies*').Count | Should -Be 1
+            @(Get-Fin '*legacy access policies*').Count | Should -Be 0
+            $ne = @(Get-NotEval)
+            $ne.Count | Should -BeGreaterThan 0
+            (($ne.Evidence.Reason) -join ' ') | Should -BeLike '*RBAC authorization model could not be read*'
+            "$($ne[0].Severity)" | Should -Be 'LOW'
         }
         It "EnableRbacAuthorization true -> no finding" {
             $global:FxVaults = @( (New-KV @{ EnableRbacAuthorization=$true }) )

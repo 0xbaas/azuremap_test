@@ -899,7 +899,7 @@ function Test-AppGatewayListenerHygiene {
     }
     if ($notEval.Count -gt 0 -and $signalTotal -gt 0) {
         Write-Finding -Severity "MEDIUM" -Status "NOTEVALUATED" -CheckId "NETWORK-009" `
-                      -Message "Application Gateway listener hygiene could not be evaluated for one or more subscriptions (collection failed); not reported as clean" `
+                      -Message "Application Gateway listener hygiene could not be evaluated for one or more subscriptions (collection failed)." `
                       -Count $notEval.Count -CountType "NotEvaluatedItems" -Data $notEval -Service "Network" `
                       -Remediation "Ensure Microsoft.Network/applicationGateways/read on all in-scope subscriptions and re-run." `
                       -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple"
@@ -1094,7 +1094,7 @@ function Test-SensitivePaaSPrivateConnectivity {
     }
     if ($notEval.Count -gt 0 -and $signalTotal -gt 0) {
         Write-Finding -Severity "MEDIUM" -Status "NOTEVALUATED" -CheckId "NETWORK-010" `
-                      -Message "Private connectivity could not be fully evaluated (resource or private-endpoint reads failed); not reported as clean" `
+                      -Message "Private connectivity could not be fully evaluated (resource or private-endpoint reads failed)." `
                       -Count $notEval.Count -CountType "NotEvaluatedItems" -Data $notEval -Service "Network" `
                       -Remediation "Ensure Microsoft.Network/privateEndpoints/read plus per-service read permissions and re-run." `
                       -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple"

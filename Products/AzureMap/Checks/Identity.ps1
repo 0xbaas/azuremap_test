@@ -585,7 +585,7 @@ function Test-IdentityResourceMapping {
     # visible as a separate NotEvaluated record so coverage loss is not hidden by FAIL.
     if ($riskyTotal -gt 0 -and $failedCount -gt 0) {
         Write-Finding -Severity "INFO" -Status 'NOTEVALUATED' -CheckId "IDENTITY-006" `
-                      -Message "Identity-resource mapping could not be fully evaluated (one or more collections failed); not reported as clean" `
+                      -Message "Identity-resource mapping could not be fully evaluated (one or more collections failed)." `
                       -Count $failedCount -Data $failures -Service "Identity" `
                       -Remediation "Re-run with an identity that can read web apps, VMs, function apps, and role assignments in all in-scope subscriptions." `
                       -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple"
@@ -709,7 +709,7 @@ function Test-RBACDecomposition {
 
     if ($notEval.Count -gt 0) {
         Write-Finding -Severity "HIGH" -Status "NOTEVALUATED" -CheckId "IDENTITY-007" `
-                      -Message "RBAC decomposition could not be evaluated for one or more subscriptions (Azure RBAC read unavailable under current authentication); not reported as clean" `
+                      -Message "RBAC decomposition could not be evaluated for one or more subscriptions (Azure RBAC read unavailable under current authentication)." `
                       -Count $notEval.Count -CountType "NotEvaluatedItems" -Data $notEval -Service "Identity" `
                       -Remediation "Ensure the ARM permission Microsoft.Authorization/roleAssignments/read is granted and re-run." `
                       -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple"

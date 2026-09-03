@@ -109,7 +109,9 @@ Describe "Performance phase" {
             $global:PerfKvItems = @([PSCustomObject]@{ VaultName = 'kv1'; ResourceGroupName = 'rg1' })
             $a = Get-SubscriptionInventory -SubscriptionId $global:PerfSub.Id -SubscriptionName $global:PerfSub.Name -TenantId 'T1' -Kind KeyVaults
             $b = Get-SubscriptionInventory -SubscriptionId $global:PerfSub.Id -SubscriptionName $global:PerfSub.Name -TenantId 'T1' -Kind KeyVaults
-            $global:PerfKvFetchCalls | Should -Be 1
+            # KeyVaults fetch = 1 list call + 1 per-vault enrichment GET; the
+            # second consumer must add no further calls (cache hit).
+            $global:PerfKvFetchCalls | Should -Be 2
             $a.FromCache | Should -BeFalse
             $b.FromCache | Should -BeTrue
             @($b.Items).Count | Should -Be 1
@@ -231,7 +233,10 @@ Describe "Performance phase" {
         It "inventory kinds use only read-only Get-* list calls (no keys/secrets/content)" {
             foreach ($kind in $script:InventoryKindMap.Keys) {
                 $fetchText = $script:InventoryKindMap[$kind].Fetch.ToString()
-                $fetchText | Should -Match '^\s*Get-|^\s*\$cmd'
+                # Fetches start with the read-only list call itself or with a
+                # local variable capture of it (e.g. $cmd feature-detect,
+                # $vaults list-then-enrich).
+                $fetchText | Should -Match '^\s*Get-|^\s*\$cmd|^\s*\$vaults'
                 $fetchText | Should -Not -Match 'listKeys|listSecrets|Get-AzStorageAccountKey|SecretValue|Get-AzKeyVaultSecret|Get-AzStorageBlob\b|Get-AzStorageFile|ConnectionString'
             }
         }

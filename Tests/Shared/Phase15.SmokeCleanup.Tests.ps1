@@ -20,7 +20,6 @@ BeforeAll {
     . "$projectRoot\Shared\Core\RunStatus.ps1"
     . "$projectRoot\Shared\Core\CheckRegistry.ps1"
     . "$projectRoot\Products\AzureMap\Core\Rbac.ps1"
-    . "$projectRoot\Future\EntraMap\Core\TenantWide.ps1"
     . "$projectRoot\Products\AzureMap\Core\InventoryCache.ps1"
     . "$projectRoot\Products\AzureMap\Checks\Storage.ps1"
     . "$projectRoot\Products\AzureMap\Checks\StorageKey.ps1"
@@ -53,7 +52,17 @@ BeforeAll {
     }
     function global:Get-AzStorageAccountNetworkRuleSet { param([Parameter(ValueFromRemainingArguments)]$r) $global:FxNet }
 
-    function global:Get-AzKeyVault       { param([Parameter(ValueFromRemainingArguments)]$r) if ($global:FxVaultsThrow) { throw "403 AuthorizationFailed listing vaults" }; $global:FxVaults }
+    function global:Get-AzKeyVault {
+        param([string]$VaultName, [string]$ResourceGroupName, [Parameter(ValueFromRemainingArguments)]$r)
+        # Enriched flow: per-vault GET returns the matching vault object.
+        if ($VaultName) {
+            $m = @($global:FxVaults | Where-Object { $_.VaultName -eq $VaultName })
+            if ($m.Count -gt 0) { return $m[0] }
+            throw "ResourceNotFound: vault $VaultName not found"
+        }
+        if ($global:FxVaultsThrow) { throw "403 AuthorizationFailed listing vaults" }
+        $global:FxVaults
+    }
     function global:Get-AzKeyVaultSecret {
         param([string]$VaultName, [Parameter(ValueFromRemainingArguments)]$r)
         if ($global:FxSecretsThrow) { throw "Forbidden: caller is not authorized" }
@@ -326,14 +335,22 @@ Describe "Phase15 - B1 smoke cleanup" {
             $entrypoint | Should -Match 'Invoke-RestMethod:UseBasicParsing'
         }
 
-        It "every Invoke-RestMethod call site passes -UseBasicParsing explicitly" {
+        It "every Invoke-RestMethod call site in repo runtime code passes -UseBasicParsing explicitly" {
             # Belt-and-braces over the session pin: the PS 5.1 "Script Execution
             # Risk" Y/A/N prompt must be impossible even if the pin is lost.
+            # (The parked EntraMap Graph.ps1 has its own copy of this grep in
+            # Future/EntraMap/Tests/Phase15.GraphSafety.Tests.ps1.)
             $repoRoot = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
-            $graph = Get-Content (Join-Path $repoRoot 'Future\EntraMap\Core\Graph.ps1') -Raw
-            $callCount = ([regex]::Matches($graph, 'Invoke-RestMethod')).Count
-            $callCount | Should -BeGreaterThan 0
-            ([regex]::Matches($graph, 'UseBasicParsing')).Count | Should -BeGreaterOrEqual $callCount
+            $files = @()
+            $files += Get-ChildItem (Join-Path $repoRoot 'Products') -Filter *.ps1 -Recurse
+            $files += Get-ChildItem (Join-Path $repoRoot 'Shared') -Filter *.ps1 -Recurse
+            foreach ($f in $files) {
+                $src = $f | Get-Content -Raw
+                $callCount = ([regex]::Matches($src, 'Invoke-RestMethod')).Count
+                if ($callCount -gt 0) {
+                    ([regex]::Matches($src, 'UseBasicParsing')).Count | Should -BeGreaterOrEqual $callCount -Because "$($f.FullName) pins UseBasicParsing at every call site"
+                }
+            }
         }
 
         It "repo runtime code has no interactive input primitives" {

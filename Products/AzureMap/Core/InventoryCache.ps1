@@ -30,7 +30,35 @@ $script:InventoryKindMap = @{
     }
     KeyVaults = @{
         Types = @('microsoft.keyvault/vaults')
-        Fetch = { Get-AzKeyVault -ErrorAction Stop }
+        # The list view (Get-AzKeyVault without -VaultName) does not populate
+        # NetworkAcls, EnableRbacAuthorization, or EnablePurgeProtection in
+        # current Az.KeyVault, so each listed vault is re-read with a per-vault
+        # GET (control-plane metadata only - never keys/secrets/certificates).
+        # A vault whose GET fails keeps its list-view object (one bad vault
+        # never fails the whole fetch); successfully enriched objects are
+        # tagged AzureMapEnriched=$true so checks can distinguish full objects
+        # from list-view fallbacks.
+        Fetch = {
+            $vaults = @(Get-AzKeyVault -ErrorAction Stop)
+            $out = New-Object System.Collections.Generic.List[object]
+            foreach ($v in $vaults) {
+                $enriched = $null
+                try {
+                    $full = Get-AzKeyVault -VaultName "$($v.VaultName)" -ResourceGroupName "$($v.ResourceGroupName)" -ErrorAction Stop
+                    # Single-object guard: anything else (null, a collection)
+                    # is treated as an enrichment failure.
+                    if ($null -ne $full -and (($full -isnot [System.Collections.IEnumerable]) -or ($full -is [string]))) {
+                        $full | Add-Member -NotePropertyName 'AzureMapEnriched' -NotePropertyValue $true -Force
+                        $enriched = $full
+                    }
+                }
+                catch {
+                    Write-AuditLog -Message ("Key Vault enrichment failed for {0}: {1}" -f $v.VaultName, $_.Exception.Message) -Level WARN
+                }
+                if ($null -ne $enriched) { $out.Add($enriched) } else { $out.Add($v) }
+            }
+            $out
+        }
     }
     NetworkSecurityGroups = @{
         Types = @('microsoft.network/networksecuritygroups')

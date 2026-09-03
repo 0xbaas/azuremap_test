@@ -718,7 +718,7 @@ function Test-AppServiceFtpState {
     }
     if ($notEval.Count -gt 0 -and $ftpOpen.Count -gt 0) {
         Write-Finding -Severity "MEDIUM" -Status "NOTEVALUATED" -CheckId "COMPUTE-006" `
-                      -Message "App Service FTP state could not be fully evaluated (collection or per-app reads failed); not reported as clean" `
+                      -Message "App Service FTP state could not be fully evaluated (collection or per-app reads failed)." `
                       -Count $notEval.Count -CountType "NotEvaluatedItems" -Data $notEval -Service "AppService" `
                       -Remediation "Ensure Microsoft.Web/sites/read on all in-scope subscriptions and re-run." `
                       -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple"
@@ -889,7 +889,7 @@ function Test-VMBackupCoverage {
     }
     if ($notEval.Count -gt 0 -and $unprotected.Count -gt 0) {
         Write-Finding -Severity "MEDIUM" -Status "NOTEVALUATED" -CheckId "COMPUTE-007" `
-                      -Message "VM backup coverage could not be fully evaluated (vault/item reads failed); not reported as clean" `
+                      -Message "VM backup coverage could not be fully evaluated (vault/item reads failed)." `
                       -Count $notEval.Count -CountType "NotEvaluatedItems" -Data $notEval -Service "Compute" `
                       -Remediation "Grant Microsoft.RecoveryServices/vaults/read and re-run." `
                       -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple"

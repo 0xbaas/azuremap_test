@@ -18,6 +18,7 @@ function Test-KeyVaultRBAC {
     Write-Section -Title "KEY VAULTS - LEGACY ACCESS POLICIES VS RBAC" -Color "Yellow" -ProgressId $ProgressId
     
     $findings = New-Object System.Collections.Generic.List[object]
+    $notEval  = New-Object System.Collections.Generic.List[object]
     $totalProcessed = 0
     
     foreach ($sub in $Subscriptions) {
@@ -40,15 +41,38 @@ function Test-KeyVaultRBAC {
         }
 
         foreach ($kv in $inv.Items) {
-            if (-not $kv.EnableRbacAuthorization) {
-                $findings.Add([PSCustomObject]@{
-                    SubscriptionId = $sub.Id
+            # List-view fallback objects (per-vault GET failed -> no
+            # AzureMapEnriched marker) and vaults whose property is absent
+            # cannot be judged: NotEvaluated, never the legacy-access-policy
+            # FAIL and never silently clean. Only an enriched object with an
+            # explicit EnableRbacAuthorization bool is evaluated.
+            $enriched = ($kv.PSObject.Properties.Name -contains 'AzureMapEnriched') -and $kv.AzureMapEnriched
+            $hasRbacProp = $kv.PSObject.Properties.Name -contains 'EnableRbacAuthorization'
+            if ($enriched -and $hasRbacProp) {
+                if ($kv.EnableRbacAuthorization -eq $false) {
+                    $findings.Add([PSCustomObject]@{
+                        SubscriptionId = $sub.Id
+                        SubscriptionName = $sub.Name
+                        ResourceGroup = $kv.ResourceGroupName
+                        VaultName = $kv.VaultName
+                        EnableRbacAuthorization = $kv.EnableRbacAuthorization
+                        ResourceId = $kv.ResourceId
+                        Tags = $kv.Tags
+                    })
+                }
+                elseif ($null -eq $kv.EnableRbacAuthorization) {
+                    $notEval.Add([PSCustomObject]@{
+                        SubscriptionName = $sub.Name
+                        VaultName = "$($kv.VaultName)"
+                        Reason = "RBAC authorization model could not be read"
+                    })
+                }
+            }
+            else {
+                $notEval.Add([PSCustomObject]@{
                     SubscriptionName = $sub.Name
-                    ResourceGroup = $kv.ResourceGroupName
-                    VaultName = $kv.VaultName
-                    EnableRbacAuthorization = $kv.EnableRbacAuthorization
-                    ResourceId = $kv.ResourceId
-                    Tags = $kv.Tags
+                    VaultName = "$($kv.VaultName)"
+                    Reason = "RBAC authorization model could not be read"
                 })
             }
         }
@@ -63,6 +87,19 @@ function Test-KeyVaultRBAC {
                       -Data $findings `
                       -Service "KeyVault" `
                       -Remediation $remediation `
+                      -Exclusions $Exclusions `
+                      -SubscriptionId "Multiple" `
+                      -SubscriptionName "Multiple"
+    }
+
+    if ($notEval.Count -gt 0) {
+        # Unreadable RBAC model is NOT clean: explicit NotEvaluated record.
+        Write-Finding -Severity "LOW" -Status "NOTEVALUATED" `
+                      -Message "Key Vault RBAC authorization model could not be read." `
+                      -Count $notEval.Count -CountType "NotEvaluatedItems" `
+                      -Data $notEval `
+                      -Service "KeyVault" `
+                      -Remediation "Ensure Microsoft.KeyVault/vaults/read on the subscriptions and re-run." `
                       -Exclusions $Exclusions `
                       -SubscriptionId "Multiple" `
                       -SubscriptionName "Multiple"
@@ -205,15 +242,30 @@ function Test-KeyVaultNetworkSecurity {
                 })
             }
 
-            # (d) purge protection. Absent/false = disabled (the vault default).
-            if (-not $kv.EnablePurgeProtection) {
-                $missingPurgeProtection.Add([PSCustomObject]@{
-                    SubscriptionId = $sub.Id
+            # (d) purge protection. On a full (enriched) vault object,
+            # null/false = genuinely disabled (the vault default) -> FAIL.
+            # A list-view fallback object (no AzureMapEnriched marker) or an
+            # absent property means the state could not be read ->
+            # NotEvaluated, never FAIL and never clean.
+            $kvEnriched = ($kv.PSObject.Properties.Name -contains 'AzureMapEnriched') -and $kv.AzureMapEnriched
+            $hasPurgeProp = $kv.PSObject.Properties.Name -contains 'EnablePurgeProtection'
+            if ($kvEnriched -and $hasPurgeProp) {
+                if (-not $kv.EnablePurgeProtection) {
+                    $missingPurgeProtection.Add([PSCustomObject]@{
+                        SubscriptionId = $sub.Id
+                        SubscriptionName = $sub.Name
+                        ResourceGroup = $kv.ResourceGroupName
+                        VaultName = $kv.VaultName
+                        ResourceId = $kv.ResourceId
+                        Tags = $kv.Tags
+                    })
+                }
+            }
+            else {
+                $notEval.Add([PSCustomObject]@{
                     SubscriptionName = $sub.Name
-                    ResourceGroup = $kv.ResourceGroupName
-                    VaultName = $kv.VaultName
-                    ResourceId = $kv.ResourceId
-                    Tags = $kv.Tags
+                    VaultName = "$($kv.VaultName)"
+                    Reason = "Purge protection state could not be read"
                 })
             }
 
@@ -355,9 +407,25 @@ function Test-KeyVaultNetworkSecurity {
 
     if ($notEval.Count -gt 0) {
         # Failed collection / unreadable properties are NOT clean: keep the detail
-        # as an explicit NotEvaluated record (no access is not "secure").
-        Write-Finding -Severity "CRITICAL" -Status "NOTEVALUATED" `
-                      -Message "Key Vault network security could not be fully evaluated (collection or property read failed); not reported as clean" `
+        # as an explicit NotEvaluated record (no access is not "secure"). An
+        # evaluation gap is never CRITICAL/HIGH - it is a coverage caveat, so the
+        # severity stays LOW and the message names the actual gap(s) rather than
+        # a generic "read failed" umbrella.
+        $gapClauses = New-Object System.Collections.Generic.List[string]
+        foreach ($e in $notEval) {
+            $r = "$($e.Reason)"
+            $clause = $null
+            if ($r -like '*networkAcls*' -or $r -like '*Firewall configuration*') { $clause = 'firewall configuration could not be read' }
+            elseif ($r -like '*Purge protection*') { $clause = 'purge protection state could not be read' }
+            elseif ($r -like '*Diagnostic settings*' -or $r -like '*Audit logging*') { $clause = 'audit logging could not be evaluated' }
+            elseif ($r -like '*collection failed*') { $clause = 'vault collection failed' }
+            elseif ($r -like '*context could not be entered*') { $clause = 'subscription context could not be entered' }
+            if (-not $clause) { $clause = 'some properties could not be read' }
+            if (-not $gapClauses.Contains($clause)) { $gapClauses.Add($clause) }
+        }
+        $gapText = $gapClauses -join '; '
+        Write-Finding -Severity "LOW" -Status "NOTEVALUATED" `
+                      -Message "Key Vault network security could not be fully evaluated: $gapText." `
                       -Count $notEval.Count -CountType "NotEvaluatedItems" `
                       -Data $notEval `
                       -Service "KeyVault" `
@@ -598,7 +666,7 @@ function Test-KeyVaultSecretsExpiry {
     # Issues found AND some vaults/subs failed: keep failure detail visible.
     if ($issuesTotal -gt 0 -and $failedCount -gt 0) {
         Write-Finding -Severity "INFO" -Status 'NOTEVALUATED' `
-                      -Message "Key Vault secret expiry could not be fully evaluated (data-plane access denied or collection failed); not reported as clean" `
+                      -Message "Key Vault secret expiry could not be fully evaluated (data-plane access denied or collection failed)." `
                       -Count $failedCount -Data $failures -Service "KeyVault" `
                       -Remediation "Grant the audit identity a data-plane role with secrets list permission (e.g. Key Vault Reader / Secrets User) and re-run." `
                       -Exclusions $Exclusions -SubscriptionId "Multiple" -SubscriptionName "Multiple" `
