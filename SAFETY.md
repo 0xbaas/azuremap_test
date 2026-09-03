@@ -68,7 +68,7 @@ Actions) — but it never invokes that action.
 
 ## EntraMap safety model (parked product)
 
-EntraMap (parked under `Future/EntraMap/`) reads Microsoft Graph metadata only. Concretely:
+EntraMap (parked under `Future/EntraMap/` — see `Future/EntraMap/README.md`) reads Microsoft Graph metadata only. Concretely:
 
 **NEVER retrieves:**
 

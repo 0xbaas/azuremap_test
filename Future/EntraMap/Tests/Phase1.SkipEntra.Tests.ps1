@@ -1,5 +1,5 @@
 #==============================================================================
-# AzureMap v2 - Tests/AzureMap/Phase1.SkipEntra.Tests.ps1
+# AzureMap v2 - Future/EntraMap/Tests/Phase1.SkipEntra.Tests.ps1
 # Phase 1 - mocked/local only. No Azure, no Graph, no authentication.
 #
 # Covers:
@@ -11,7 +11,8 @@
 #==============================================================================
 
 BeforeAll {
-    $projectRoot = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
+    # Parked under Future/EntraMap/Tests: repo root is three levels up.
+    $projectRoot = Split-Path -Path (Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent) -Parent
 
     . "$projectRoot\Shared\Core\State.ps1"
     . "$projectRoot\Shared\Core\Logging.ps1"

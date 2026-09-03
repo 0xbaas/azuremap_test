@@ -21,7 +21,16 @@
 #       false clean PASS
 #   (f) repo layout: root has only azuremap.ps1 active, Products/ holds only
 #       AzureMap, EntraMap is parked under Future/EntraMap
+#
+# Portability: the EntraMap composition probe and the parked-layout assertions
+# are skipped (not failed) when Future/EntraMap is absent, so this file stays
+# green both while the parked tree lives here and after it moves out.
 #==============================================================================
+
+# Discovery-time flag: It -Skip: is bound during discovery, before BeforeAll
+# runs, so the presence check must happen at file scope.
+$script:EntraMapRoot    = Join-Path (Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent) 'Future\EntraMap'
+$script:EntraMapPresent = Test-Path $script:EntraMapRoot
 
 BeforeAll {
     $script:ProjectRoot = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
@@ -155,7 +164,11 @@ $probe | ConvertTo-Json -Compress -Depth 4
     }
 
     $script:AzureProbe = Invoke-ProductProbe -Product 'Azure'
-    $script:EntraProbe = Invoke-ProductProbe -Product 'Entra'
+    # Recompute at run time: the file-scope $script:EntraMapPresent is set
+    # during discovery (for It -Skip:) and is not visible in the run phase.
+    if (Test-Path (Join-Path $script:ProjectRoot 'Future\EntraMap')) {
+        $script:EntraProbe = Invoke-ProductProbe -Product 'Entra'
+    }
 }
 
 AfterAll {
@@ -201,13 +214,13 @@ Describe "AzureMap composition (Azure-only product)" {
 
 Describe "EntraMap composition (parked product, loaded from Future/EntraMap)" {
 
-    It "registers all twelve Entra checks (ENTRA-01..ENTRA-12)" {
+    It "registers all twelve Entra checks (ENTRA-01..ENTRA-12)" -Skip:(-not $script:EntraMapPresent) {
         1..12 | ForEach-Object {
             $script:EntraProbe.RegisteredCheckIds | Should -Contain ("ENTRA-{0:d2}" -f $_)
         }
     }
 
-    It "registers the relocated tenant-identity checks and no Azure resource checks" {
+    It "registers the relocated tenant-identity checks and no Azure resource checks" -Skip:(-not $script:EntraMapPresent) {
         'IDENTITY-001', 'IDENTITY-002', 'IDENTITY-004' | ForEach-Object {
             $script:EntraProbe.RegisteredCheckIds | Should -Contain $_
         }
@@ -216,27 +229,27 @@ Describe "EntraMap composition (parked product, loaded from Future/EntraMap)" {
         $script:EntraProbe.HasDormantCheck    | Should -BeTrue
     }
 
-    It "has no ARM discovery/scanning surface" {
+    It "has no ARM discovery/scanning surface" -Skip:(-not $script:EntraMapPresent) {
         $script:EntraProbe.HasEnvironmentFootprint  | Should -BeFalse
         $script:EntraProbe.HasSubscriptionInventory | Should -BeFalse
         $script:EntraProbe.HasCapabilityModel       | Should -BeFalse
     }
 
-    It "Graph preflight succeeds without an ARM context and without subscription discovery" {
+    It "Graph preflight succeeds without an ARM context and without subscription discovery" -Skip:(-not $script:EntraMapPresent) {
         $script:EntraProbe.PreflightShouldStop         | Should -BeFalse
         $script:EntraProbe.PreflightEntraInScope       | Should -BeTrue
         $script:EntraProbe.PreflightGraphTokenAcquired | Should -BeTrue
         $script:EntraProbe.AzSubscriptionCalled        | Should -BeFalse
     }
 
-    It "labels the run as the Entra product" {
+    It "labels the run as the Entra product" -Skip:(-not $script:EntraMapPresent) {
         $script:EntraProbe.ProductName    | Should -Be 'EntraMap'
         $script:EntraProbe.RunModeLabel   | Should -Be 'Entra-only (EntraMap)'
         $script:EntraProbe.ProductTagline | Should -Be 'Entra ID Security Assessment'
         $script:EntraProbe.BannerContainsTagline | Should -BeTrue
     }
 
-    It "IDENTITY-002 with no Azure subscription scope is NotEvaluated, never a clean PASS" {
+    It "IDENTITY-002 with no Azure subscription scope is NotEvaluated, never a clean PASS" -Skip:(-not $script:EntraMapPresent) {
         $script:EntraProbe.DormantStatus       | Should -Be 'NotEvaluated'
         $script:EntraProbe.DormantMessage      | Should -Match 'no Azure subscription scope'
         $script:EntraProbe.DormantPassFindings | Should -Be 0
@@ -263,7 +276,7 @@ Describe "Entrypoints and deprecated switches" {
         $src | Should -Not -Match 'Invoke-AzureMapCollection'
     }
 
-    It "entramap.ps1 (parked) loads only the Entra composition (no AzureMap product code / subscription discovery)" {
+    It "entramap.ps1 (parked) loads only the Entra composition (no AzureMap product code / subscription discovery)" -Skip:(-not $script:EntraMapPresent) {
         $src = (Get-Content -Path "$script:ProjectRoot\Future\EntraMap\entramap.ps1" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n"
         $src | Should -Match 'Shared\\Core'
         $src | Should -Match 'Shared\\Export'
@@ -314,7 +327,7 @@ Describe "Repo layout (EntraMap parked)" {
         $dirs.Name | Should -Be @('AzureMap')
     }
 
-    It "EntraMap is parked under Future/EntraMap with entrypoint, wrapper and tests" {
+    It "EntraMap is parked under Future/EntraMap with entrypoint, wrapper and tests" -Skip:(-not $script:EntraMapPresent) {
         Test-Path "$script:ProjectRoot\Future\EntraMap\entramap.ps1"       | Should -BeTrue
         Test-Path "$script:ProjectRoot\Future\EntraMap\run-entramap.ps1"   | Should -BeTrue
         Test-Path "$script:ProjectRoot\Future\EntraMap\Core\Graph.ps1"     | Should -BeTrue
@@ -322,14 +335,14 @@ Describe "Repo layout (EntraMap parked)" {
         Test-Path "$script:ProjectRoot\Future\EntraMap\Docs\EntraMap.md"   | Should -BeTrue
     }
 
-    It "the parked wrapper invokes the sibling entramap.ps1 and carries the parked header" {
+    It "the parked wrapper invokes the sibling entramap.ps1 and carries the parked header" -Skip:(-not $script:EntraMapPresent) {
         $src = Get-Content -Path "$script:ProjectRoot\Future\EntraMap\run-entramap.ps1" -Raw
         $src | Should -Match 'parked for a future phase'
         $src | Should -Match 'Join-Path \$PSScriptRoot ''entramap\.ps1'''
         $src | Should -Not -Match 'Products\\EntraMap'
     }
 
-    It "the parked entrypoint still resolves the repo root (two levels up to Shared\)" {
+    It "the parked entrypoint still resolves the repo root (two levels up to Shared\)" -Skip:(-not $script:EntraMapPresent) {
         $src = Get-Content -Path "$script:ProjectRoot\Future\EntraMap\entramap.ps1" -Raw
         $src | Should -Match 'Shared\\Core\\State\.ps1'
         # two-levels-up repoRoot computation unchanged by the move

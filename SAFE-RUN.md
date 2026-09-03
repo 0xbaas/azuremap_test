@@ -86,7 +86,8 @@ exploitation.
 ## Common runs — EntraMap (parked)
 
 EntraMap is parked for a future phase under `Future/EntraMap/` and is not part
-of the active workflow. To run it anyway:
+of the active workflow (see `Future/EntraMap/README.md` for status and
+prerequisites). To run it anyway:
 
 ```powershell
 # Full tenant audit (Microsoft Graph, GET-only).

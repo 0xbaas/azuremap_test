@@ -2,6 +2,20 @@
 
 All notable AzureMap phases, newest first. Tags mark each accepted phase.
 
+## Unreleased — EntraMap parking hygiene
+
+- **Active suite decoupled from the parked tree**: EntraMap-scoped tests moved
+  to `Future/EntraMap/Tests` (`Phase1.SkipEntra` moved outright; the
+  `Graph.ps1` UseBasicParsing grep moved as `Phase15.GraphSafety`);
+  AzureMap-scoped tests (`Phase10.Dispatch`, `Phase11.SmokeFixes`,
+  `Phase15.SmokeCleanup`, `AzureCheckEquivalence`) no longer dot-source
+  anything under `Future/EntraMap`. `Phase25.Split` skips its parked-layout
+  and Entra-composition assertions when `Future/EntraMap` is absent, so
+  `Invoke-Pester -Path ./Tests` is green with the folder present or moved out.
+- **`Future/EntraMap/README.md`** documents the parked status, how to run
+  EntraMap, its remaining dependencies on `Shared/` and `ReferenceData/`, and
+  the move-out checklist for making it standalone.
+
 ## Unreleased — standalone AzureMap UX pass
 
 - **Pentester is now the default HTML report layout.** No `-ReportLayout`

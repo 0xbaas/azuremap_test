@@ -6,7 +6,7 @@ AzureMap never changes your environment. See [SAFETY.md](SAFETY.md) for the safe
 ## Which tool for which job
 
 - **AzureMap** (`azuremap.ps1`) — the active product. Audits **Azure subscriptions** on the ARM control plane: Storage, Key Vault, Network, Compute, SQL, Messaging, Data Platform, Monitoring, Identity/RBAC, and public exposure, plus read-only capability/attack-path insights. It never requests a Microsoft Graph token.
-- **EntraMap** — **parked for a future phase** under [`Future/EntraMap/`](Future/EntraMap/), not part of the active workflow. It audits an **Entra ID tenant** via Microsoft Graph (privileged roles, PIM, applications, OAuth consent, Conditional Access, and more). See [Future/EntraMap/Docs/EntraMap.md](Future/EntraMap/Docs/EntraMap.md).
+- **EntraMap** — **parked for a future phase** under [`Future/EntraMap/`](Future/EntraMap/), not part of the active workflow. It audits an **Entra ID tenant** via Microsoft Graph (privileged roles, PIM, applications, OAuth consent, Conditional Access, and more). See [Future/EntraMap/README.md](Future/EntraMap/README.md) (parked status, run instructions, shared dependencies) and [Future/EntraMap/Docs/EntraMap.md](Future/EntraMap/Docs/EntraMap.md).
 
 ## Quick start
 
@@ -23,6 +23,7 @@ The HTML report uses the Pentester dashboard layout by default; pass `-ReportLay
 ## Documentation
 
 - [Products/AzureMap/Docs/AzureMap.md](Products/AzureMap/Docs/AzureMap.md) — AzureMap: modes/flags, data-plane contract, redaction, capability insights, runtime, limitations
+- [Future/EntraMap/README.md](Future/EntraMap/README.md) — EntraMap (parked): status, how to run, what must move with it when it becomes standalone
 - [Future/EntraMap/Docs/EntraMap.md](Future/EntraMap/Docs/EntraMap.md) — EntraMap (parked): Graph auth, collected tenant data, checks and permissions, limitations
 - [SAFE-RUN.md](SAFE-RUN.md) — safe-run guide and release smoke checklists
 - [SAFETY.md](SAFETY.md) — safety rules (what the tools may and may not do)

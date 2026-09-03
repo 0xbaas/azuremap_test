@@ -15,6 +15,7 @@ Products/
     Docs/       AzureMap.md
 Future/
   EntraMap/                      # PARKED - not part of the active workflow
+    README.md           # parked status, run instructions, move-out checklist
     entramap.ps1        # real EntraMap entrypoint
     run-entramap.ps1    # thin wrapper invoking the sibling entramap.ps1
     Core/       Graph, Collection, TenantWide, Footprint.Entra, Preflight.Entra

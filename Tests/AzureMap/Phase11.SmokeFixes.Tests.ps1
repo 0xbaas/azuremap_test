@@ -18,7 +18,6 @@ BeforeAll {
     . "$projectRoot\Shared\Core\Logging.ps1"
     . "$projectRoot\Shared\Core\Exclusions.ps1"
     . "$projectRoot\Shared\Core\Retry.ps1"
-    . "$projectRoot\Future\EntraMap\Core\Graph.ps1"
     . "$projectRoot\Shared\Core\RunStatus.ps1"
     . "$projectRoot\Products\AzureMap\Core\Footprint.ps1"
     . "$projectRoot\Shared\Core\CheckRegistry.ps1"
